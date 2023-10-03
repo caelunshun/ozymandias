@@ -2,11 +2,11 @@
 
 use crate::medium::Medium;
 use crate::path::SimplifiedPath;
-use crate::pipe;
 use crate::storage::{
     CompressionFormat, DataBlockId, FileDataChunkLocation, FileInstance, FileNode, FileNodeId,
     Index, Revision,
 };
+use crate::{pipe, MAX_IO_PARALLELISM, PIPE_BUFFER_SIZE, READ_BUFFER_SIZE, TARGET_BLOCK_SIZE};
 use anyhow::Context;
 use flume::Sender;
 use fs_err as fs;
@@ -17,19 +17,6 @@ use std::path::{Path, PathBuf};
 use threadpool::ThreadPool;
 use time::OffsetDateTime;
 
-#[allow(non_upper_case_globals)]
-const KiB: usize = 1024;
-#[allow(non_upper_case_globals)]
-const MiB: usize = 1024 * KiB;
-
-/// Desired approximate size of a single data block.
-const TARGET_BLOCK_SIZE: u64 = 32 * MiB as u64;
-
-/// Size of the pipe buffer for each data block.
-pub const PIPE_BUFFER_SIZE: usize = 256 * KiB;
-
-const NUM_IO_THREADS: usize = 8;
-
 #[derive(Debug)]
 enum MessageToDriver {
     NewBlock { id: DataBlockId, data: pipe::Reader },
@@ -38,33 +25,31 @@ enum MessageToDriver {
 }
 
 /// The main coordinator thread for a backup process.
-pub struct Driver {
-    medium: Box<dyn Medium>,
+pub struct Driver<'a> {
+    medium: &'a mut dyn Medium,
     io_thread_pool: ThreadPool,
+    src_dir: PathBuf,
 }
 
-impl Driver {
-    pub fn new(medium: Box<dyn Medium>) -> Self {
+impl<'a> Driver<'a> {
+    pub fn new(medium: &'a mut dyn Medium, src_dir: impl AsRef<Path>) -> Self {
         Self {
             medium,
-            io_thread_pool: ThreadPool::new(NUM_IO_THREADS),
+            io_thread_pool: ThreadPool::new(MAX_IO_PARALLELISM),
+            src_dir: src_dir.as_ref().to_path_buf(),
         }
     }
 
     /// Executes a backup of the given directory to the underlying storage medium.
-    pub fn run(&mut self, dir: impl AsRef<Path>) -> anyhow::Result<()> {
-        let (messages_tx, messages) = flume::unbounded();
-
+    pub fn run(self) -> anyhow::Result<()> {
         let mut index = self
             .medium
             .load_index()?
             .map(|bytes| Index::deserialize(&bytes))
             .unwrap_or_else(|| Ok(Index::new()))?;
 
-        let dir = dir.as_ref();
-
         tracing::info!("Scanning files to back up");
-        let files = self.enumerate_files(dir)?;
+        let files = self.enumerate_source_files()?;
         let total_size = files.iter().map(|f| f.len).sum::<u64>();
         tracing::info!(
             "Found {} files, totaling {} of data",
@@ -100,6 +85,9 @@ impl Driver {
         let mut partitions = partition_files(small_files_to_create, |f| f.len, TARGET_BLOCK_SIZE);
         partitions.extend(large_files_to_create.into_iter().map(|f| vec![f]));
 
+        tracing::info!("Commencing backup with {} partitions", partitions.len());
+
+        let (messages_tx, messages) = flume::unbounded();
         for partition in partitions {
             let messages_tx = messages_tx.clone();
             self.io_thread_pool.execute(move || {
@@ -128,6 +116,8 @@ impl Driver {
         self.io_thread_pool.join();
         self.medium.flush()?;
 
+        tracing::info!("Updating index");
+
         // Write the final index state.
         let mut tree = BTreeMap::new();
         for file in files {
@@ -144,17 +134,24 @@ impl Driver {
             .queue_save_index(index.serialize(CompressionFormat::Zstd));
         self.medium.flush()?;
 
+        tracing::info!("Backup complete.");
+
         Ok(())
     }
 
     /// Enumerates files in the backup directory, evaluating their metadata
     /// (in parallel).
-    fn enumerate_files(&self, dir: &Path) -> anyhow::Result<Vec<FileMetadata>> {
+    fn enumerate_source_files(&self) -> anyhow::Result<Vec<FileMetadata>> {
         let (sink, receiver) = flume::unbounded();
 
-        self.enumerate_files_recursive(dir, &SimplifiedPath::default(), &sink)?;
+        self.enumerate_source_files_recursive(
+            self.src_dir.as_path(),
+            &SimplifiedPath::default(),
+            &sink,
+        )?;
 
         let mut files = Vec::new();
+        drop(sink);
         for result in receiver {
             let metadata = result?;
             files.push(metadata);
@@ -163,7 +160,7 @@ impl Driver {
         Ok(files)
     }
 
-    fn enumerate_files_recursive(
+    fn enumerate_source_files_recursive(
         &self,
         dir: &Path,
         dir_simplified_path: &SimplifiedPath,
@@ -179,7 +176,7 @@ impl Driver {
             if entry_type.is_symlink() {
                 todo!("follow symlinks")
             } else if entry_type.is_dir() {
-                self.enumerate_files_recursive(&entry.path(), &entry_simplified_path, sink)?;
+                self.enumerate_source_files_recursive(&entry.path(), &entry_simplified_path, sink)?;
             } else if entry_type.is_file() {
                 let sink = sink.clone();
                 let path = entry.path();
@@ -212,7 +209,7 @@ impl FileMetadata {
     pub fn read(path: impl AsRef<Path>, simplified_path: SimplifiedPath) -> anyhow::Result<Self> {
         let mut hasher = blake3::Hasher::new();
         let mut len = 0;
-        let mut buffer = vec![0u8; PIPE_BUFFER_SIZE];
+        let mut buffer = vec![0u8; READ_BUFFER_SIZE];
 
         let mut file = fs::File::open(path.as_ref())?;
         loop {
@@ -303,7 +300,7 @@ fn process_partition(
         let mut chunks = Vec::new();
 
         loop {
-            let chunk_offset = current_block.bytes_written();
+            let chunk_offset = current_block.uncompressed_bytes_written;
             let (status, chunk_len) = current_block.append(&mut file, |data| {
                 hasher.update(data);
             })?;
@@ -342,6 +339,8 @@ fn process_partition(
         }
     }
 
+    current_block.finish();
+
     Ok(())
 }
 
@@ -349,12 +348,11 @@ struct BlockWriter {
     id: DataBlockId,
     writer: zstd::Encoder<'static, pipe::Writer>,
     read_buffer: Vec<u8>,
+    uncompressed_bytes_written: u64,
 }
 
 impl BlockWriter {
-    const READ_BUFFER_SIZE: usize = 64 * KiB;
-
-    fn bytes_written(&self) -> u64 {
+    fn compressed_bytes_written(&self) -> u64 {
         self.writer.get_ref().bytes_written()
     }
 
@@ -365,8 +363,9 @@ impl BlockWriter {
         (
             Self {
                 writer,
-                read_buffer: vec![0u8; Self::READ_BUFFER_SIZE],
+                read_buffer: vec![0u8; READ_BUFFER_SIZE],
                 id: DataBlockId::new_random(),
+                uncompressed_bytes_written: 0,
             },
             reader,
         )
@@ -382,21 +381,22 @@ impl BlockWriter {
         mut preview_data: impl FnMut(&[u8]),
     ) -> anyhow::Result<(FileWriteStatus, u64)> {
         let mut bytes_written = 0;
-        loop {
+        let result = loop {
             match data.read(&mut self.read_buffer) {
-                Ok(0) => break,
+                Ok(0) => break Ok((FileWriteStatus::Complete, bytes_written)),
                 Ok(n) => {
                     preview_data(&self.read_buffer[..n]);
                     self.writer.write_all(&self.read_buffer[..n])?;
                     bytes_written += n as u64;
-                    if self.bytes_written() > TARGET_BLOCK_SIZE {
-                        return Ok((FileWriteStatus::Incomplete, bytes_written));
+                    self.uncompressed_bytes_written += n as u64;
+                    if self.compressed_bytes_written() > TARGET_BLOCK_SIZE {
+                        break Ok((FileWriteStatus::Incomplete, bytes_written));
                     }
                 }
                 Err(e) => return Err(e.into()),
             }
-        }
-        Ok((FileWriteStatus::Complete, bytes_written))
+        };
+        result
     }
 
     pub fn finish(self) {
@@ -442,7 +442,7 @@ mod tests {
     #[ignore] // (TODO)
     fn partition_files_tricky_optimization_case() {
         // Naive approach of sorting the files and greedily assigning them to partitions will not work here.
-        let mut files = vec![1, 1, 1, 8, 8];
+        let files = vec![1, 1, 1, 8, 8];
         let mut partitions = partition_files(files, |x| *x, 10);
         partitions.iter_mut().for_each(|p| p.sort());
         partitions.sort();

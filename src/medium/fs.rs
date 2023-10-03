@@ -1,12 +1,13 @@
-use crate::backup::PIPE_BUFFER_SIZE;
 use crate::medium::Medium;
 use crate::pipe;
 use crate::pipe::Reader;
 use crate::storage::DataBlockId;
+use crate::PIPE_BUFFER_SIZE;
 use anyhow::Context;
 use file_guard::{FileGuard, Lock};
 use flume::{Receiver, Sender};
 use fs_err as fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{
@@ -16,12 +17,13 @@ use std::{
 
 const LOCKFILE_NAME: &str = "lock";
 const INDEX_NAME: &str = "index";
+const TEMP_INDEX_NAME: &str = "index.temp";
 const DATA_BLOCKS_DIR: &str = "data";
 
 /// A medium backed by a directory mounted to the filesystem.
 pub struct FilesystemMedium {
     dir: Arc<Path>,
-    lock: FileGuard<fs::File>,
+    _lock: FileGuard<Arc<std::fs::File>>,
     errors_tx: Sender<anyhow::Error>,
     errors: Receiver<anyhow::Error>,
     join_handles: Vec<JoinHandle<()>>,
@@ -30,20 +32,20 @@ pub struct FilesystemMedium {
 impl FilesystemMedium {
     pub fn new(dir: impl AsRef<Path>) -> anyhow::Result<Self> {
         let dir = dir.as_ref();
-        fs::create_dir(dir)?;
+        fs::create_dir(dir).ok();
 
         let data_dir = dir.join(DATA_BLOCKS_DIR);
-        fs::create_dir(data_dir)?;
+        fs::create_dir(data_dir).ok();
 
         let lockfile = dir.join(LOCKFILE_NAME);
         let lockfile = fs::File::create(lockfile)?;
-        let lock = file_guard::lock(lockfile, Lock::Exclusive, 0, 1)?;
+        let lock = file_guard::lock(Arc::new(lockfile.into_parts().0), Lock::Exclusive, 0, 1)?;
 
         let (errors_tx, errors) = flume::unbounded();
 
         Ok(Self {
             dir: dir.to_path_buf().into(),
-            lock,
+            _lock: lock,
             errors_tx,
             errors,
             join_handles: Vec::new(),
@@ -52,6 +54,10 @@ impl FilesystemMedium {
 
     fn index_path(&self) -> PathBuf {
         self.dir.join(INDEX_NAME)
+    }
+
+    fn temp_index_path(&self) -> PathBuf {
+        self.dir.join(TEMP_INDEX_NAME)
     }
 
     fn data_block_path(&self, id: DataBlockId) -> PathBuf {
@@ -80,9 +86,14 @@ impl Medium for FilesystemMedium {
     }
 
     fn queue_save_index(&mut self, index_data: Vec<u8>) {
-        let path = self.index_path();
-        self.execute_fallible(move || {
-            fs::write(&path, &index_data)?;
+        let temp_path = self.temp_index_path();
+        let target_path = self.index_path();
+        self.execute_threaded(move || {
+            let mut temp = fs::File::create(&temp_path)?;
+            temp.write_all(&index_data)?;
+            temp.sync_all()?;
+            drop(temp);
+            fs::rename(temp_path, target_path)?;
             Ok(())
         });
     }
@@ -91,21 +102,22 @@ impl Medium for FilesystemMedium {
         let (writer, reader) = pipe::new(PIPE_BUFFER_SIZE);
         let file = match fs::File::open(self.data_block_path(id)) {
             Ok(f) => f,
-            Err(e) if e.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
         };
         self.execute_threaded(move || {
-            writer.consume_reader(file);
+            writer.copy_from(file);
             Ok(())
         });
         Ok(Some(reader))
     }
 
-    fn queue_save_data_block(&mut self, id: DataBlockId, mut data: Reader) {
+    fn queue_save_data_block(&mut self, id: DataBlockId, data: Reader) {
         let path = self.data_block_path(id);
         self.execute_threaded(move || {
             let mut file = fs::File::create(path)?;
-            io::copy(&mut data, &mut file)?;
+            data.copy_to(&mut file)?;
+            file.sync_all()?;
             Ok(())
         });
     }

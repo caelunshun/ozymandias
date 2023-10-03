@@ -3,11 +3,12 @@ use crate::storage::DataBlockId;
 
 pub mod fs;
 pub mod memory;
+pub mod s3;
 
 /// A storage medium for backup data.
 ///
 /// Note that many functions here are specified to not block on I/O operations.
-/// Medium implementations must use e.g. a thread pool and a queue to avoid blocking
+/// Medium implementations must use e.g. a thread spawner and a queue to avoid blocking
 /// the driver thread.
 ///
 /// # Locking contract

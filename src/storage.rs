@@ -54,6 +54,8 @@ use std::io::Cursor;
 use std::io::Read;
 use time::OffsetDateTime;
 
+pub type RevisionId = usize;
+
 const MAGIC_STRING: &[u8] = b"OZYMANDIAS";
 
 /// Current version of the index file format. Must be incremented
