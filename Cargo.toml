@@ -2,6 +2,11 @@
 name = "ozymandias"
 version = "0.1.0"
 edition = "2021"
+description = "Alpha-quality backup program."
+license = "GPL-3"
+documentation = "https://docs.rs/ozymandias"
+repository = "https://github.com/caelunshun/ozymandias"
+homepage = "https://github.com/caelunshun/ozymandias"
 
 [dependencies]
 anyhow = "1"
