@@ -9,8 +9,6 @@ use std::io;
 use std::io::{Cursor, Read, Write};
 use std::pin::pin;
 use std::sync::{Arc, Mutex};
-use std::task::Poll;
-use tokio::io::ReadBuf;
 
 /// Creates a new pipe with the specified buffer capacity.
 ///

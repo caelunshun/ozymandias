@@ -24,8 +24,8 @@ pub struct S3Medium {
 }
 
 impl S3Medium {
-    pub fn new(config: SdkConfig, bucket: &str, subdirectory: Option<&str>) -> Self {
-        let client = Client::new(&config);
+    pub fn new(config: &SdkConfig, bucket: &str, subdirectory: Option<&str>) -> Self {
+        let client = Client::new(config);
         let tokio_handle = runtime::Builder::new_multi_thread()
             .enable_all()
             .worker_threads(1)
