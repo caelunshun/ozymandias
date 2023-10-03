@@ -7,6 +7,7 @@ use crossbeam_queue::SegQueue;
 use event_listener::{Event, EventListener};
 use fs_err as fs;
 use std::collections::HashMap;
+use std::io;
 use std::io::{BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::pin::pin;
@@ -164,20 +165,49 @@ impl<'a> Driver<'a> {
 
     fn execute_load_chunked(
         &mut self,
-        _file: SimplifiedPath,
-        _chunks: Vec<FileDataChunkLocation>,
+        file: SimplifiedPath,
+        chunks: Vec<FileDataChunkLocation>,
     ) -> anyhow::Result<()> {
-        todo!()
+        self.wait_for_new_job()?;
+        let (requests_tx, requests) = flume::bounded(1);
+        let path = file.instantiate_with_root(&self.target_dir);
+        self.execute_job(move || {
+            let mut file = fs::File::create(path)?;
+
+            for chunk in chunks {
+                let (send, recv) = flume::bounded(0);
+                requests_tx
+                    .send((chunk.block, send))
+                    .ok()
+                    .context("disconnect")?;
+
+                let mut decoder = recv.recv()?;
+                // TODO: this implementation does not handle chunked files
+                // grouped with small files in the same block. However,
+                // the backup encoder does not currently encode such files.
+                io::copy(&mut decoder, &mut file)?;
+            }
+
+            Ok(())
+        });
+
+        for (block, sender) in requests {
+            let block_reader = self.open_data_block(block)?;
+            sender.send(block_reader).ok().context("disconnect")?;
+        }
+
+        Ok(())
     }
 
     fn execute_job(&self, job: impl FnOnce() -> anyhow::Result<()> + Send + 'static) {
         let shared = Arc::clone(&self.shared);
+        self.shared.running_jobs.fetch_add(1, Ordering::SeqCst);
         self.io_thread_pool.execute(move || {
             if let Err(e) = job() {
                 shared.errors.push(e);
             }
             shared.running_jobs.fetch_sub(1, Ordering::SeqCst);
-            shared.job_completed.notify(1);
+            shared.job_completed.notify(usize::MAX);
         });
     }
 
@@ -197,27 +227,31 @@ impl<'a> Driver<'a> {
         if self.shared.running_jobs.load(Ordering::Acquire) >= MAX_IO_PARALLELISM {
             listener.wait();
         }
-
-        if let Some(err) = self.shared.errors.pop() {
-            return Err(err);
-        }
-
-        self.shared.running_jobs.fetch_add(1, Ordering::AcqRel);
+        self.check_errors()?;
         Ok(())
     }
 
     fn wait_for_job_completion(&self) -> anyhow::Result<()> {
-        let mut listener = pin!(EventListener::new(&self.shared.job_completed));
+        let mut listener = Box::pin(EventListener::new(&self.shared.job_completed));
         listener.as_mut().listen();
         while self.shared.running_jobs.load(Ordering::Acquire) > 0 {
             listener.as_mut().wait();
+            listener = Box::pin(EventListener::new(&self.shared.job_completed));
+            listener.as_mut().listen();
+            self.check_errors()?;
         }
 
-        if let Some(error) = self.shared.errors.pop() {
-            return Err(error);
-        }
+        self.check_errors()?;
 
         Ok(())
+    }
+
+    fn check_errors(&self) -> anyhow::Result<()> {
+        if let Some(err) = self.shared.errors.pop() {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 }
 

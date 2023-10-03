@@ -38,3 +38,6 @@ aws-sdk-s3 = "0.31"
 [dev-dependencies]
 rstest = "0.18"
 tempfile = "3"
+
+[profile.dev]
+opt-level = 1
