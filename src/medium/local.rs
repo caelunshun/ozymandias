@@ -24,9 +24,9 @@ impl LocalMedium {
 }
 
 impl Medium for LocalMedium {
-    fn load_version(&self, n: u64) -> anyhow::Result<Version> {
+    fn load_version(&self, n: u64) -> anyhow::Result<Option<Version>> {
         let mut versions = Vec::new();
-        for entry in fs::read_dir(&self.dir.join(VERSIONS_DIR))? {
+        for entry in fs::read_dir(self.dir.join(VERSIONS_DIR))? {
             let entry = entry?;
             let version_timestamp =
                 version_timestamp_from_file_name(&get_file_name(&entry.path())?)?;
@@ -36,10 +36,14 @@ impl Medium for LocalMedium {
         // Note: path will be used to resolve ties in the event of duplicate timestamps (unlikely...)
         versions.sort();
 
-        let path = versions[(n as usize).min(versions.len() - 1)].1.clone();
+        if n as usize >= versions.len() {
+            return Ok(None);
+        }
+
+        let path = versions[n as usize].1.clone();
 
         let version = ciborium::from_reader(zstd::Decoder::new(fs::File::open(path)?)?)?;
-        Ok(version)
+        Ok(Some(version))
     }
 
     fn save_version(&self, version: Version) -> anyhow::Result<()> {
@@ -68,8 +72,9 @@ impl Medium for LocalMedium {
     fn save_block(&self, block_id: BlockId) -> Box<dyn Write + Send> {
         let path = self.dir.join(BLOCKS_DIR).join(block_file_name(block_id));
         let (writer, mut reader) = pipe::new(IO_BUFFER_SIZE);
+        let compression_level = self.compression_level;
         thread::spawn(move || {
-            if let Err(e) = stream_to_file(&mut reader, &path) {
+            if let Err(e) = stream_to_file(&mut reader, &path, compression_level) {
                 reader.disconnect_with_error(e);
             }
         });
@@ -79,12 +84,16 @@ impl Medium for LocalMedium {
 
 fn stream_from_file(writer: &mut pipe::Writer, path: &Path) -> io::Result<()> {
     let mut file = fs::File::open(path)?;
-    io::copy(&mut file, writer)?;
+    io::copy(&mut zstd::Decoder::new(file)?, writer)?;
     Ok(())
 }
 
-fn stream_to_file(reader: &mut pipe::Reader, path: &Path) -> io::Result<()> {
+fn stream_to_file(
+    reader: &mut pipe::Reader,
+    path: &Path,
+    compression_level: i32,
+) -> io::Result<()> {
     let mut file = fs::File::create(path)?;
-    io::copy(reader, &mut file)?;
+    io::copy(reader, &mut zstd::Encoder::new(file, compression_level)?)?;
     Ok(())
 }

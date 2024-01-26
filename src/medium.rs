@@ -43,7 +43,7 @@ fn block_file_name(block_id: BlockId) -> String {
 /// An interface to the underlying storage medium for backups.
 pub trait Medium: Send + Sync + 'static {
     /// Synchronously loads the `n`th *most recent* version.
-    fn load_version(&self, n: u64) -> anyhow::Result<Version>;
+    fn load_version(&self, n: u64) -> anyhow::Result<Option<Version>>;
 
     /// Synchronously saves a new version.
     fn save_version(&self, version: Version) -> anyhow::Result<()>;

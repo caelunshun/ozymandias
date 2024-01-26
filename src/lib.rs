@@ -1,8 +1,9 @@
 extern crate fs_err as fs;
 
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use std::path::Path;
 
+mod backup;
 mod chunks_reader;
 mod medium;
 mod model;
@@ -11,7 +12,9 @@ mod pipe;
 /// File permissions. `None` when files are sourced from non-Unix systems.
 type Permissions = Option<u32>;
 
+#[allow(non_upper_case_globals)]
 const KiB: usize = 1024;
+#[allow(non_upper_case_globals)]
 const MiB: usize = 1024 * KiB;
 
 /// General buffer size for filesystem IO operations.
@@ -33,7 +36,20 @@ const APPROX_MAX_BLOCK_SIZE: usize = 64 * MiB;
 
 fn get_file_name(path: &Path) -> anyhow::Result<String> {
     path.file_name()
+        .context("missing file name")?
         .to_str()
         .ok_or_else(|| anyhow!("invalid UTF-8 in path: {}", path.display()))
         .map(str::to_owned)
+}
+
+#[cfg(unix)]
+fn get_file_permissions(path: &Path) -> anyhow::Result<Permissions> {
+    let metadata = fs::metadata(path)?;
+    use std::os::unix::fs::MetadataExt;
+    Ok(Some(metadata.mode()))
+}
+
+#[cfg(not(unix))]
+fn get_file_permissions(_path: &Path) -> anyhow::Result<Permissions> {
+    Ok(None)
 }

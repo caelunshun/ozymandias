@@ -63,15 +63,15 @@ impl Version {
 /// Stores the filesystem tree in a particular backup version.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Tree {
-    root_children: Vec<DirectoryEntry>,
+    root_children: Vec<TreeEntry>,
 }
 
 impl Tree {
-    pub fn new(root_children: Vec<DirectoryEntry>) -> Self {
+    pub fn new(root_children: Vec<TreeEntry>) -> Self {
         Self { root_children }
     }
 
-    pub fn root_children(&self) -> impl Iterator<Item = &DirectoryEntry> {
+    pub fn root_children(&self) -> impl Iterator<Item = &TreeEntry> {
         self.root_children.iter()
     }
 }

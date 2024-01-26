@@ -4,6 +4,7 @@
 //!
 //! Pipes support both asynchronous and synchronous operation.
 
+use anyhow::anyhow;
 use diatomic_waker::{WakeSink, WakeSource};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::io::{Error, Read, Write};
@@ -83,7 +84,7 @@ impl Write for Writer {
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
+        pollster::block_on(<Self as AsyncWriteExt>::flush(self))
     }
 }
 
@@ -138,8 +139,27 @@ impl AsyncWrite for Writer {
         Poll::Ready(Ok(bytes_written))
     }
 
-    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
-        Poll::Ready(Ok(()))
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        let waker = cx.waker();
+        self.reader_progress.register(waker);
+        self.reader_drop.register(waker);
+
+        let num_bytes_in_buffer = self.producer.buffer().capacity() - self.producer.slots();
+        if num_bytes_in_buffer == 0 {
+            return Poll::Ready(Ok(()));
+        }
+
+        if self.producer.is_abandoned() {
+            let error = self.reader_error.lock().unwrap().take().unwrap_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    anyhow!("flush() called, but reader disconnected"),
+                )
+            });
+            return Poll::Ready(Err(error));
+        }
+
+        Poll::Pending
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -261,15 +281,20 @@ mod tests {
     #[test]
     fn blocking() {
         let (mut writer, mut reader) = super::new(256);
+        let (finished_tx, finished) = flume::bounded(1);
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(500));
             writer.write_all(&[0u8; 2048]).unwrap();
+            writer.flush().unwrap();
+            finished_tx.send(()).unwrap();
         });
 
         let mut buffer = [0u8; 2048];
         reader.read_exact(&mut buffer).unwrap();
 
         assert_eq!(reader.read(&mut buffer).unwrap(), 0);
+
+        finished.recv().unwrap();
     }
 
     #[test]
