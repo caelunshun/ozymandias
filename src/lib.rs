@@ -1,6 +1,10 @@
 extern crate fs_err as fs;
 
+use anyhow::anyhow;
+use std::path::Path;
+
 mod chunks_reader;
+mod medium;
 mod model;
 mod pipe;
 
@@ -26,3 +30,10 @@ const CHUNK_SIZE: usize = 1 * MiB;
 /// is allowed to exceed this value by less
 /// than the chunk size.)
 const APPROX_MAX_BLOCK_SIZE: usize = 64 * MiB;
+
+fn get_file_name(path: &Path) -> anyhow::Result<String> {
+    path.file_name()
+        .to_str()
+        .ok_or_else(|| anyhow!("invalid UTF-8 in path: {}", path.display()))
+        .map(str::to_owned)
+}

@@ -50,6 +50,14 @@ impl Version {
             tree,
         }
     }
+
+    pub fn timestamp(&self) -> DateTime<Utc> {
+        self.timestamp
+    }
+
+    pub fn tree(&self) -> &Tree {
+        &self.tree
+    }
 }
 
 /// Stores the filesystem tree in a particular backup version.
