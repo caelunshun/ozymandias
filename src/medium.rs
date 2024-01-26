@@ -1,5 +1,4 @@
 use crate::model::{BlockId, Version};
-use anyhow::bail;
 use chrono::{DateTime, Utc};
 use std::io::{Read, Write};
 
@@ -13,24 +12,16 @@ const BLOCKS_DIR: &str = "blocks";
 
 /// Returns the file name that should be used to store the given version.
 fn version_file_name(version: &Version) -> String {
-    let random_bytes: [u8; 8] = rand::random();
-    let timestamp_part = version
+    version
         .timestamp()
         .to_rfc3339()
         .replace(':', "_")
-        .to_owned();
-    let random_part = hex::encode(random_bytes);
-    format!("{timestamp_part}.{random_part}")
+        .to_owned()
 }
 
 fn version_timestamp_from_file_name(file_name: &str) -> anyhow::Result<DateTime<Utc>> {
-    let parts: Vec<&str> = file_name.split('.').collect();
-    if parts.len() != 2 {
-        bail!("expected x.y format in version file name");
-    }
-
-    let timestamp = parts[0];
-    DateTime::parse_from_rfc3339(timestamp)
+    let timestamp = file_name.replace('_', ":");
+    DateTime::parse_from_rfc3339(&timestamp)
         .map_err(anyhow::Error::from)
         .map(|ts| ts.to_utc())
 }

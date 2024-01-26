@@ -130,7 +130,7 @@ impl AsyncWrite for Writer {
 
         if bytes_to_write == chunk_a.len() {
             let bytes_to_write = chunk_b.len().min(buf.len());
-            chunk_b.copy_from_slice(&buf[..bytes_to_write]);
+            chunk_b[..bytes_to_write].copy_from_slice(&buf[..bytes_to_write]);
             bytes_written += bytes_to_write;
         }
 

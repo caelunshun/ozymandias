@@ -3,12 +3,12 @@ extern crate fs_err as fs;
 use anyhow::{anyhow, Context};
 use std::path::Path;
 
-mod backup;
+pub mod backup;
 mod chunks_reader;
-mod medium;
+pub mod medium;
 mod model;
 mod pipe;
-mod restore;
+pub mod restore;
 
 /// File permissions. `None` when files are sourced from non-Unix systems.
 type Permissions = Option<u32>;

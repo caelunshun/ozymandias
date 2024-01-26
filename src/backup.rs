@@ -20,7 +20,7 @@ pub struct Config<'a> {
     pub medium: &'a dyn Medium,
 }
 
-pub fn create_backup(config: Config) -> anyhow::Result<()> {
+pub fn run(config: Config) -> anyhow::Result<()> {
     let mut driver = Driver::new(config)?;
     let root_entry = driver.back_up_dir(&driver.config.source_dir.clone())?;
 
@@ -102,12 +102,13 @@ impl<'a> Driver<'a> {
                     };
 
                     current_block.writer.write_all(&chunk_bytes)?;
-                    current_block.bytes_written += chunk_bytes.len();
 
                     let location = ChunkLocation {
                         block: current_block.id,
                         uncompressed_byte_offset: current_block.bytes_written,
                     };
+                    current_block.bytes_written += chunk_bytes.len();
+
                     self.known_chunks.insert(hash, location.clone());
                     location
                 }

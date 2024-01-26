@@ -268,11 +268,9 @@ impl<'a> Driver<'a> {
             bail!("chunks within a block overlap - currently unsupported");
         }
 
-        skip_bytes_in_reader(
-            &mut source_block.reader,
-            u64::try_from(chunk.location.uncompressed_byte_offset).unwrap()
-                - u64::try_from(source_block.bytes_read).unwrap(),
-        )?;
+        let bytes_to_skip = chunk.location.uncompressed_byte_offset - source_block.bytes_read;
+        skip_bytes_in_reader(&mut source_block.reader, bytes_to_skip.try_into().unwrap())?;
+        source_block.bytes_read += bytes_to_skip;
 
         let chunk_size = chunk.num_bytes;
         if chunk_size > MAX_RESTORE_CHUNK_SIZE {
@@ -280,7 +278,9 @@ impl<'a> Driver<'a> {
         }
 
         let mut buffer = vec![0u8; chunk_size];
+        dbg!(buffer.len());
         source_block.reader.read_exact(&mut buffer)?;
+        source_block.bytes_read += chunk_size;
 
         match chunk.target_byte_offset {
             Some(offset) => {

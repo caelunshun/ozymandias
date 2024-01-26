@@ -1,5 +1,7 @@
-/*use fs_err as fs;
-use ozymandias::medium::fs::FilesystemMedium;
+use anyhow::Context;
+use fs_err as fs;
+use ozymandias::medium::local::LocalMedium;
+use ozymandias::medium::Medium;
 use ozymandias::{backup, restore};
 use std::iter;
 use tempfile::tempdir;
@@ -24,10 +26,18 @@ fn backup_and_restore() -> anyhow::Result<()> {
     fs::write(src_dir.path().join("b"), &file_b_contents)?;
     fs::write(src_dir.path().join("c"), &file_c_contents)?;
 
-    let mut medium = FilesystemMedium::new(backup_dir.path())?;
+    let medium = LocalMedium::new(
+        backup_dir.path(),
+        "the_backup",
+        zstd::DEFAULT_COMPRESSION_LEVEL,
+    )?;
 
-    backup::Driver::new(&mut medium, &src_dir).run()?;
-    restore::Driver::new(&mut medium, &restore_dir)?.run(0)?;
+    backup::run(backup::Config {
+        source_dir: src_dir.path().to_path_buf(),
+        medium: &medium,
+    })?;
+    let version = medium.load_version(0)?.context("version not created")?;
+    restore::run(&medium, &version, restore_dir.path())?;
 
     let a = fs::read(restore_dir.path().join("a"))?;
     assert_eq!(a.as_slice(), file_a_contents.as_bytes());
@@ -37,4 +47,4 @@ fn backup_and_restore() -> anyhow::Result<()> {
     assert_eq!(c.as_slice(), file_c_contents.as_slice());
 
     Ok(())
-}*/
+}

@@ -4,6 +4,7 @@ use crate::medium::{
 };
 use crate::model::{BlockId, Version};
 use crate::{get_file_name, pipe, IO_BUFFER_SIZE};
+use anyhow::bail;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::{io, thread};
@@ -15,11 +16,19 @@ pub struct LocalMedium {
 }
 
 impl LocalMedium {
-    pub fn new(backups_dir: impl AsRef<Path>, backup_name: &str, compression_level: i32) -> Self {
-        Self {
-            dir: backups_dir.as_ref().join(backup_name),
+    pub fn new(
+        backups_dir: impl AsRef<Path>,
+        backup_name: &str,
+        compression_level: i32,
+    ) -> anyhow::Result<Self> {
+        let dir = backups_dir.as_ref().join(backup_name);
+        create_dir_if_not_exists(&dir)?;
+        create_dir_if_not_exists(dir.join(VERSIONS_DIR))?;
+        create_dir_if_not_exists(dir.join(BLOCKS_DIR))?;
+        Ok(Self {
+            dir,
             compression_level,
-        }
+        })
     }
 }
 
@@ -51,10 +60,9 @@ impl Medium for LocalMedium {
             .dir
             .join(VERSIONS_DIR)
             .join(version_file_name(&version));
-        ciborium::into_writer(
-            &version,
-            zstd::Encoder::new(fs::File::create(path)?, self.compression_level)?,
-        )?;
+        let mut encoder = zstd::Encoder::new(fs::File::create(path)?, self.compression_level)?;
+        ciborium::into_writer(&version, &mut encoder)?;
+        encoder.finish()?;
         Ok(())
     }
 
@@ -83,7 +91,7 @@ impl Medium for LocalMedium {
 }
 
 fn stream_from_file(writer: &mut pipe::Writer, path: &Path) -> io::Result<()> {
-    let mut file = fs::File::open(path)?;
+    let file = fs::File::open(path)?;
     io::copy(&mut zstd::Decoder::new(file)?, writer)?;
     Ok(())
 }
@@ -93,7 +101,23 @@ fn stream_to_file(
     path: &Path,
     compression_level: i32,
 ) -> io::Result<()> {
-    let mut file = fs::File::create(path)?;
-    io::copy(reader, &mut zstd::Encoder::new(file, compression_level)?)?;
+    let file = fs::File::create(path)?;
+    let mut encoder = zstd::Encoder::new(file, compression_level)?;
+    io::copy(reader, &mut encoder)?;
+    encoder.finish()?;
     Ok(())
+}
+
+fn create_dir_if_not_exists(path: impl AsRef<Path>) -> anyhow::Result<()> {
+    match fs::create_dir(path.as_ref()) {
+        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+            if fs::metadata(path)?.is_dir() {
+                Ok(())
+            } else {
+                bail!("could not create directory as a non-directory file already exists here")
+            }
+        }
+        Err(e) => Err(e.into()),
+        Ok(_) => Ok(()),
+    }
 }
