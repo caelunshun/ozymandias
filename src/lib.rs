@@ -8,6 +8,7 @@ mod chunks_reader;
 mod medium;
 mod model;
 mod pipe;
+mod restore;
 
 /// File permissions. `None` when files are sourced from non-Unix systems.
 type Permissions = Option<u32>;
@@ -24,6 +25,10 @@ const IO_BUFFER_SIZE: usize = 2 * MiB;
 /// Files are split into chunks to support a limited degree
 /// of diffing across multiple versions of a large file.
 const CHUNK_SIZE: usize = 1 * MiB;
+
+/// Maximum chunk size that will be accepted by the restore system.
+/// This limit exists to avoid OOM situations.
+const MAX_RESTORE_CHUNK_SIZE: usize = 256 * MiB;
 
 /// Approximate maximum size of a block.
 /// A block is a collection of file chunks from

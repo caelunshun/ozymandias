@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
 use uuid::Uuid;
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct BlockId(Uuid);
 
 impl BlockId {
@@ -82,9 +82,19 @@ pub enum TreeEntry {
     Directory(DirectoryEntry),
 }
 
+impl TreeEntry {
+    pub fn name(&self) -> &str {
+        match self {
+            TreeEntry::File(f) => &f.name,
+            TreeEntry::Directory(d) => &d.name,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileEntry {
     pub name: String,
+    /// All data chunks in the file in the order they appear.
     pub chunks: Vec<ChunkMetadata>,
     pub permissions: Permissions,
 }
@@ -99,7 +109,8 @@ pub struct ChunkMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkLocation {
     pub block: BlockId,
-    pub byte_offset: usize,
+    /// Byte offset within the (uncompressed) chunk.
+    pub uncompressed_byte_offset: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

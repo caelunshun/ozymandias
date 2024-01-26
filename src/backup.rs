@@ -106,7 +106,7 @@ impl<'a> Driver<'a> {
 
                     let location = ChunkLocation {
                         block: current_block.id,
-                        byte_offset: current_block.bytes_written,
+                        uncompressed_byte_offset: current_block.bytes_written,
                     };
                     self.known_chunks.insert(hash, location.clone());
                     location
