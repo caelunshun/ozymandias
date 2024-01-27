@@ -185,12 +185,10 @@ async fn stream_object_to_s3(
 ) -> anyhow::Result<()> {
     // To enable retriability, we unfortunately need to
     // collect the whole buffer into memory.
-    dbg!();
     let mut buf = Vec::new();
     AsyncReadExt::read_to_end(pipe, &mut buf).await?;
     let body = ByteStream::from(buf);
 
-    dbg!();
     client
         .put_object()
         .bucket(bucket)
@@ -198,7 +196,6 @@ async fn stream_object_to_s3(
         .body(body)
         .send()
         .await?;
-    dbg!();
 
     Ok(())
 }

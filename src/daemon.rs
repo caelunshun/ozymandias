@@ -79,6 +79,7 @@ fn run_inner(
                     let now = Utc::now();
                     if scheduled_backup_time < now {
                         next_backup = Some(backup);
+                        sleep_time = Duration::zero();
                         break;
                     }
 
@@ -90,6 +91,7 @@ fn run_inner(
                 }
                 None => {
                     next_backup = Some(backup);
+                    sleep_time = Duration::zero();
                     break;
                 }
             }
