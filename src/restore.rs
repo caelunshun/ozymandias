@@ -15,6 +15,7 @@ use crate::medium::Medium;
 use crate::model::{BlockId, ChunkHash, ChunkLocation, FileEntry, Tree, TreeEntry, Version};
 use crate::MAX_RESTORE_CHUNK_SIZE;
 use anyhow::bail;
+use indicatif::{HumanBytes, ProgressBar};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::{io, iter};
@@ -25,9 +26,16 @@ pub fn run(
     target_root: impl AsRef<Path>,
 ) -> anyhow::Result<()> {
     let target_root = target_root.as_ref();
+
+    let progress = ProgressBar::new_spinner();
+    progress.set_message("scanning");
+
     let plan = create_plan(version.tree(), target_root)?;
     create_directory_structure(version.tree(), target_root)?;
-    Driver::new(medium).do_restore(&plan)?;
+    drop(progress);
+
+    Driver::new(medium, &plan).do_restore()?;
+
     Ok(())
 }
 
@@ -52,6 +60,13 @@ impl Plan {
                 restore_chunk.location.uncompressed_byte_offset,
             )
         });
+    }
+
+    pub fn total_bytes_to_restore(&self) -> u64 {
+        self.restore_chunks
+            .iter()
+            .map(|chunk| u64::try_from(chunk.num_bytes).unwrap())
+            .sum()
     }
 }
 
@@ -91,7 +106,7 @@ fn add_entry_to_plan(
         }
         TreeEntry::Directory(dir) => {
             for child in &dir.children {
-                add_entry_to_plan(child, &current_path.join(&dir.name), plan)?;
+                add_entry_to_plan(child, &current_path.join(child.name()), plan)?;
             }
         }
     }
@@ -205,7 +220,7 @@ fn create_directory_structure_recursive(
         }
 
         for child in &dir.children {
-            create_directory_structure_recursive(entry, &current_path.join(child.name()))?;
+            create_directory_structure_recursive(child, &current_path.join(child.name()))?;
         }
     }
     Ok(())
@@ -215,24 +230,40 @@ fn create_directory_structure_recursive(
 /// and an initialized directory structure.
 struct Driver<'a> {
     medium: &'a dyn Medium,
-    /// Current block being fetched from the medium.
+    plan: &'a Plan,
+    /// Current block fetched from the medium.
     /// Cached so it can be used across multiple chunks.
     current_block: Option<CurrentBlock>,
     current_open_file: Option<CurrentOpenFile>,
+    progress: ProgressBar,
+    total_bytes_restored: u64,
 }
 
 impl<'a> Driver<'a> {
-    pub fn new(medium: &'a dyn Medium) -> Self {
+    pub fn new(medium: &'a dyn Medium, plan: &'a Plan) -> Self {
         Self {
             medium,
+            plan,
             current_block: None,
             current_open_file: None,
+            progress: ProgressBar::new(plan.total_bytes_to_restore()),
+            total_bytes_restored: 0,
         }
     }
 
-    pub fn do_restore(&mut self, plan: &Plan) -> anyhow::Result<()> {
-        for chunk in &plan.restore_chunks {
+    fn update_progress(&mut self) {
+        self.progress.set_position(self.total_bytes_restored);
+        self.progress.set_message(format!(
+            "restoring: {} / {}",
+            HumanBytes(self.total_bytes_restored),
+            HumanBytes(self.plan.total_bytes_to_restore())
+        ));
+    }
+
+    pub fn do_restore(&mut self) -> anyhow::Result<()> {
+        for chunk in &self.plan.restore_chunks {
             self.restore_chunk(chunk)?;
+            self.update_progress();
         }
         Ok(())
     }
@@ -255,31 +286,19 @@ impl<'a> Driver<'a> {
         let source_block = match &mut self.current_block {
             Some(cached) if cached.id == chunk.location.block => cached,
             _ => {
-                let reader = self.medium.load_block(chunk.location.block)?;
+                let mut reader = self.medium.load_block(chunk.location.block)?;
+                let mut bytes = Vec::new();
+                reader.read_to_end(&mut bytes)?;
+
                 self.current_block.insert(CurrentBlock {
-                    reader,
+                    bytes,
                     id: chunk.location.block,
-                    bytes_read: 0,
                 })
             }
         };
 
-        if chunk.location.uncompressed_byte_offset < source_block.bytes_read {
-            bail!("chunks within a block overlap - currently unsupported");
-        }
-
-        let bytes_to_skip = chunk.location.uncompressed_byte_offset - source_block.bytes_read;
-        skip_bytes_in_reader(&mut source_block.reader, bytes_to_skip.try_into().unwrap())?;
-        source_block.bytes_read += bytes_to_skip;
-
         let chunk_size = chunk.num_bytes;
-        if chunk_size > MAX_RESTORE_CHUNK_SIZE {
-            bail!("chunk size of {chunk_size} bytes is too large");
-        }
-
-        let mut buffer = vec![0u8; chunk_size];
-        source_block.reader.read_exact(&mut buffer)?;
-        source_block.bytes_read += chunk_size;
+        self.total_bytes_restored += u64::try_from(chunk_size).unwrap();
 
         match chunk.target_byte_offset {
             Some(offset) => {
@@ -289,7 +308,8 @@ impl<'a> Driver<'a> {
                 target_file.seek(SeekFrom::End(0))?;
             }
         }
-        target_file.write_all(&buffer)?;
+        let bytes = &source_block.bytes[chunk.location.uncompressed_byte_offset..][..chunk_size];
+        target_file.write_all(bytes)?;
 
         Ok(())
     }
@@ -297,8 +317,7 @@ impl<'a> Driver<'a> {
 
 struct CurrentBlock {
     id: BlockId,
-    reader: Box<dyn Read>,
-    bytes_read: usize,
+    bytes: Vec<u8>,
 }
 
 struct CurrentOpenFile {
@@ -308,22 +327,4 @@ struct CurrentOpenFile {
 
 fn open_or_create_file(path: &Path) -> io::Result<fs::File> {
     fs::OpenOptions::new().write(true).create(true).open(path)
-}
-
-fn skip_bytes_in_reader(reader: &mut impl Read, num_bytes_to_skip: u64) -> anyhow::Result<()> {
-    let mut buf = [0u8; 128];
-    let mut read_bytes = 0;
-    while read_bytes < num_bytes_to_skip {
-        let bytes_left = num_bytes_to_skip - read_bytes;
-        let max_bytes_this_iteration: usize = (u64::try_from(buf.len()).unwrap())
-            .min(bytes_left)
-            .try_into()
-            .unwrap();
-        match reader.read(&mut buf[..max_bytes_this_iteration]) {
-            Ok(0) => bail!("unexpected EOF in block"),
-            Ok(n) => read_bytes += u64::try_from(n).unwrap(),
-            Err(e) => return Err(e.into()),
-        }
-    }
-    Ok(())
 }

@@ -17,6 +17,7 @@ pub struct LocalMedium {
 
 impl LocalMedium {
     pub fn new(backups_dir: impl AsRef<Path>, backup_name: &str) -> anyhow::Result<Self> {
+        create_dir_if_not_exists(backups_dir.as_ref())?;
         let dir = backups_dir.as_ref().join(backup_name);
         create_dir_if_not_exists(&dir)?;
         create_dir_if_not_exists(dir.join(VERSIONS_DIR))?;

@@ -10,8 +10,6 @@ use tempfile::tempdir;
 
 #[test]
 fn backup_and_restore() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::try_init().ok();
-
     let src_dir = tempdir()?;
     let backup_dir = tempdir()?;
     let restore_dir = tempdir()?;

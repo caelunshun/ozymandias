@@ -11,6 +11,7 @@ use crate::model::{
 };
 use crate::{get_file_name, get_file_permissions, APPROX_MAX_BLOCK_SIZE, CHUNK_SIZE};
 use anyhow::anyhow;
+use indicatif::{HumanBytes, ProgressBar};
 use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -40,6 +41,9 @@ struct Driver<'a> {
     config: Config<'a>,
     current_block: Option<CurrentBlock>,
     known_chunks: HashMap<ChunkHash, ChunkLocation>,
+    progress: ProgressBar,
+    total_bytes_stored: u64,
+    total_bytes_processed: u64,
 }
 
 struct CurrentBlock {
@@ -69,15 +73,29 @@ impl<'a> Driver<'a> {
             config,
             current_block: None,
             known_chunks,
+            progress: ProgressBar::new_spinner(),
+            total_bytes_processed: 0,
+            total_bytes_stored: 0,
         })
     }
 
+    fn update_progress(&mut self) {
+        self.progress.set_message(format!(
+            "{} fresh / {} total",
+            HumanBytes(self.total_bytes_stored),
+            HumanBytes(self.total_bytes_processed)
+        ));
+    }
+
     fn back_up_path(&mut self, path: &Path) -> anyhow::Result<TreeEntry> {
-        match fs::metadata(path)?.file_type() {
+        dbg!(path);
+        let result = match fs::metadata(path)?.file_type() {
             f if f.is_file() => self.back_up_file(path).map(TreeEntry::File),
             f if f.is_dir() => self.back_up_dir(path).map(TreeEntry::Directory),
             _ => Err(anyhow!("unsupported file type at {}", path.display())),
-        }
+        };
+        self.update_progress();
+        result
     }
 
     pub fn back_up_dir(&mut self, path: &Path) -> anyhow::Result<DirectoryEntry> {
@@ -125,6 +143,7 @@ impl<'a> Driver<'a> {
                         uncompressed_byte_offset: current_block.bytes_written,
                     };
                     current_block.bytes_written += chunk_bytes.len();
+                    self.total_bytes_stored += u64::try_from(chunk_bytes.len()).unwrap();
 
                     self.known_chunks.insert(hash, location.clone());
                     location
@@ -136,6 +155,7 @@ impl<'a> Driver<'a> {
                 location,
                 uncompressed_size: chunk_bytes.len(),
             });
+            self.total_bytes_processed += u64::try_from(chunk_bytes.len()).unwrap();
 
             if self
                 .current_block
@@ -145,6 +165,8 @@ impl<'a> Driver<'a> {
             {
                 self.start_new_block()?;
             }
+
+            self.update_progress();
         }
 
         Ok(FileEntry {
