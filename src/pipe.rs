@@ -83,12 +83,9 @@ impl Writer {
     ///
     /// Returns the number of bytes copied from the reader, which is 0 if an end
     /// of stream was encountered.
+    #[allow(unused)]
     pub fn copy_from_reader(&mut self, reader: impl Read + Unpin) -> io::Result<usize> {
-        let reader = NaiveAsyncReadAdapter::new(reader);
-        let mut reader = pin!(reader);
-        pollster::block_on(future::poll_fn(|cx| {
-            self.poll_copy_from_reader(cx, reader.as_mut())
-        }))
+        pollster::block_on(self.async_copy_from_reader(NaiveAsyncReadAdapter::new(reader)))
     }
 
     /// Like `copy_from_reader`, but keeps copying until either an EOF
@@ -99,10 +96,23 @@ impl Writer {
     /// Returns `Ok` if the end of stream in `reader` is reached.
     /// Returns `Err` if the reader returns an error, or if an error
     /// is propagated from the other side of the pipe.
-    pub fn copy_all_from_reader(&mut self, mut reader: impl Read + Unpin) -> io::Result<u64> {
+    pub fn copy_all_from_reader(&mut self, reader: impl Read + Unpin) -> io::Result<u64> {
+        pollster::block_on(self.async_copy_all_from_reader(NaiveAsyncReadAdapter::new(reader)))
+    }
+
+    /// Async version of `copy_from_reader`.
+    pub async fn async_copy_from_reader(&mut self, reader: impl AsyncRead) -> io::Result<usize> {
+        let mut reader = pin!(reader);
+
+        future::poll_fn(|cx| self.poll_copy_from_reader(cx, reader.as_mut())).await
+    }
+
+    /// Async version of `copy_all_from_reader`.
+    pub async fn async_copy_all_from_reader(&mut self, reader: impl AsyncRead) -> io::Result<u64> {
+        let mut reader = pin!(reader);
         let mut bytes_written = 0;
         loop {
-            match self.copy_from_reader(&mut reader) {
+            match self.async_copy_from_reader(reader.as_mut()).await {
                 Ok(0) => return Ok(bytes_written), // EOF
                 Ok(n) => bytes_written += u64::try_from(n).unwrap(),
                 Err(e) => return Err(e),
@@ -244,12 +254,9 @@ impl Reader {
     /// Returns the number of bytes written to the writer.
     /// Use `copy_all_to_writer` to copy all bytes from the pipe
     /// until the stream becomes empty.
+    #[allow(unused)]
     pub fn copy_to_writer<W: Write + Unpin>(&mut self, writer: W) -> io::Result<usize> {
-        let mut writer = NaiveAsyncWriteAdapter::new(writer);
-        let mut writer = Pin::new(&mut writer);
-
-        let fut = future::poll_fn(|cx| self.poll_copy_to_writer(cx, writer.as_mut()));
-        pollster::block_on(fut)
+        pollster::block_on(self.async_copy_to_writer(NaiveAsyncWriteAdapter::new(writer)))
     }
 
     /// Copies data from the pipe to the provided writer
@@ -257,10 +264,23 @@ impl Reader {
     /// on either side of the pipe.
     ///
     /// Returns the total number of bytes read from the pipe.
-    pub fn copy_all_to_writer<W: Write + Unpin>(&mut self, mut writer: W) -> io::Result<u64> {
+    pub fn copy_all_to_writer<W: Write + Unpin>(&mut self, writer: W) -> io::Result<u64> {
+        pollster::block_on(self.async_copy_all_to_writer(NaiveAsyncWriteAdapter::new(writer)))
+    }
+
+    /// Async version of `copy_to_writer`.
+    pub async fn async_copy_to_writer<W: AsyncWrite>(&mut self, writer: W) -> io::Result<usize> {
+        let mut writer = pin!(writer);
+        let fut = future::poll_fn(|cx| self.poll_copy_to_writer(cx, writer.as_mut()));
+        fut.await
+    }
+
+    ///  Async version of `copy_all_to_writer`.
+    pub async fn async_copy_all_to_writer<W: AsyncWrite>(&mut self, writer: W) -> io::Result<u64> {
+        let mut writer = pin!(writer);
         let mut bytes_read = 0;
         loop {
-            match self.copy_to_writer(&mut writer) {
+            match self.async_copy_to_writer(writer.as_mut()).await {
                 Ok(0) => return Ok(bytes_read),
                 Ok(n) => bytes_read += u64::try_from(n).unwrap(),
                 Err(e) => return Err(e),

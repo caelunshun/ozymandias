@@ -4,6 +4,7 @@ use std::io::{Read, Write};
 
 pub mod compressing;
 pub mod local;
+pub mod s3;
 
 /// Recommended directory name for versions.
 const VERSIONS_DIR: &str = "versions";

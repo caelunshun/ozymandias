@@ -8,7 +8,7 @@ use anyhow::bail;
 use chrono::{DateTime, Utc};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::{io, thread};
+use std::{cmp, io, thread};
 
 /// A medium that stores backups on the local filesystem.
 pub struct LocalMedium {
@@ -35,8 +35,7 @@ impl Medium for LocalMedium {
             versions.push((version_timestamp, entry.path()));
         }
 
-        // Note: path will be used to resolve ties in the event of duplicate timestamps (unlikely...)
-        versions.sort();
+        versions.sort_by_key(|(date, _)| cmp::Reverse(*date));
 
         if n as usize >= versions.len() {
             return Ok(None);
