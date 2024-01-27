@@ -18,6 +18,7 @@ fn backup_and_restore() -> anyhow::Result<()> {
 
     let file_a_contents = "foobarbaz";
     let file_b_contents = "ozymandias".repeat(1024 * 64);
+    let start = std::time::Instant::now();
     let file_c_contents: Vec<u8> = iter::repeat_with(rand::random::<u8>)
         .take(1024 * 1024 * 256)
         .collect();

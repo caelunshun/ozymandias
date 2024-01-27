@@ -924,17 +924,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "file-guard"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3e004c9a5e0dfb52dc6ec8b71fdd28c084b535d4c3c9ea21a1c324f1011f97b0"
-dependencies = [
- "cfg-if",
- "libc",
- "winapi",
-]
-
-[[package]]
 name = "flume"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1539,7 +1528,6 @@ dependencies = [
  "ciborium",
  "clap",
  "diatomic-waker",
- "file-guard",
  "flume",
  "fs-err",
  "hex",
@@ -1559,7 +1547,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "uuid",
- "winapi",
  "zstd",
 ]
 

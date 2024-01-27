@@ -138,15 +138,21 @@ impl Writer {
 
         let num_bytes = producer.slots();
         let mut chunk = producer
-            .write_chunk(num_bytes)
+            .write_chunk_uninit(num_bytes)
             .expect("num_bytes available for writing");
         let (chunk_a, _) = chunk.as_mut_slices();
 
-        let mut buf = ReadBuf::new(chunk_a);
+        let mut buf = ReadBuf::uninit(chunk_a);
         ready!(reader.poll_read(cx, &mut buf))?;
         let bytes_written = buf.filled().len();
+        unsafe {
+            // SOUNDNESS: `ReadBuf` guarantees that all
+            // bytes in the filled portion of the buffer are initialized.
+            // Since bytes_written == filled.len(), all bytes
+            // being committed are initialized.
+            chunk.commit(bytes_written);
+        }
 
-        chunk.commit(bytes_written);
         self.writer_progress.notify();
         Poll::Ready(Ok(bytes_written))
     }

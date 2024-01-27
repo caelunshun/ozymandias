@@ -278,7 +278,6 @@ impl<'a> Driver<'a> {
         }
 
         let mut buffer = vec![0u8; chunk_size];
-        dbg!(buffer.len());
         source_block.reader.read_exact(&mut buffer)?;
         source_block.bytes_read += chunk_size;
 

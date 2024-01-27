@@ -17,7 +17,6 @@ chrono = { version = "0.4", features = ["serde"] }
 ciborium = "0.2"
 clap = { version = "4", features = ["derive"] }
 diatomic-waker = "0.1"
-file-guard = "0.1"
 flume = "0.11"
 fs-err = "2"
 hex = "0.4"
@@ -35,8 +34,6 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 url = "2"
 uuid = { version = "1", features = ["v7", "serde"] }
-# work around file-guard compilation error
-winapi = { version = "0.3", features = ["std"] }
 zstd = { version = "0.13", features = ["zstdmt"] }
 
 [dev-dependencies]
@@ -44,4 +41,4 @@ rstest = "0.18"
 tempfile = "3"
 
 [profile.dev.package.'*']
-opt-level = 1
+opt-level = 3
