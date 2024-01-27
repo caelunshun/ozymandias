@@ -6,7 +6,7 @@ use std::path::Path;
 pub mod backup;
 mod chunks_reader;
 pub mod medium;
-mod model;
+pub mod model;
 mod pipe;
 pub mod restore;
 

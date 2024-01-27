@@ -2,9 +2,10 @@ use crate::medium::{
     block_file_name, version_file_name, version_timestamp_from_file_name, Medium, BLOCKS_DIR,
     VERSIONS_DIR,
 };
-use crate::model::{BlockId, Version};
+use crate::model::BlockId;
 use crate::{get_file_name, pipe, IO_BUFFER_SIZE};
 use anyhow::bail;
+use chrono::{DateTime, Utc};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::{io, thread};
@@ -12,28 +13,20 @@ use std::{io, thread};
 /// A medium that stores backups on the local filesystem.
 pub struct LocalMedium {
     dir: PathBuf,
-    compression_level: i32,
 }
 
 impl LocalMedium {
-    pub fn new(
-        backups_dir: impl AsRef<Path>,
-        backup_name: &str,
-        compression_level: i32,
-    ) -> anyhow::Result<Self> {
+    pub fn new(backups_dir: impl AsRef<Path>, backup_name: &str) -> anyhow::Result<Self> {
         let dir = backups_dir.as_ref().join(backup_name);
         create_dir_if_not_exists(&dir)?;
         create_dir_if_not_exists(dir.join(VERSIONS_DIR))?;
         create_dir_if_not_exists(dir.join(BLOCKS_DIR))?;
-        Ok(Self {
-            dir,
-            compression_level,
-        })
+        Ok(Self { dir })
     }
 }
 
 impl Medium for LocalMedium {
-    fn load_version(&self, n: u64) -> anyhow::Result<Option<Version>> {
+    fn load_version(&self, n: u64) -> anyhow::Result<Option<Vec<u8>>> {
         let mut versions = Vec::new();
         for entry in fs::read_dir(self.dir.join(VERSIONS_DIR))? {
             let entry = entry?;
@@ -51,22 +44,20 @@ impl Medium for LocalMedium {
 
         let path = versions[n as usize].1.clone();
 
-        let version = ciborium::from_reader(zstd::Decoder::new(fs::File::open(path)?)?)?;
+        let version = fs::read(path)?;
         Ok(Some(version))
     }
 
-    fn save_version(&self, version: Version) -> anyhow::Result<()> {
+    fn save_version(&self, version: Vec<u8>, timestamp: DateTime<Utc>) -> anyhow::Result<()> {
         let path = self
             .dir
             .join(VERSIONS_DIR)
-            .join(version_file_name(&version));
-        let mut encoder = zstd::Encoder::new(fs::File::create(path)?, self.compression_level)?;
-        ciborium::into_writer(&version, &mut encoder)?;
-        encoder.finish()?;
+            .join(version_file_name(timestamp));
+        fs::write(path, version)?;
         Ok(())
     }
 
-    fn load_block(&self, block_id: BlockId) -> Box<dyn Read + Send> {
+    fn load_block(&self, block_id: BlockId) -> anyhow::Result<Box<dyn Read + Send>> {
         let path = self.dir.join(BLOCKS_DIR).join(block_file_name(block_id));
         let (mut writer, reader) = pipe::new(IO_BUFFER_SIZE);
         thread::spawn(move || {
@@ -74,37 +65,29 @@ impl Medium for LocalMedium {
                 writer.disconnect_with_error(e);
             }
         });
-        Box::new(reader)
+        Ok(Box::new(reader))
     }
 
-    fn save_block(&self, block_id: BlockId) -> Box<dyn Write + Send> {
+    fn save_block(&self, block_id: BlockId) -> anyhow::Result<Box<dyn Write + Send>> {
         let path = self.dir.join(BLOCKS_DIR).join(block_file_name(block_id));
         let (writer, mut reader) = pipe::new(IO_BUFFER_SIZE);
-        let compression_level = self.compression_level;
         thread::spawn(move || {
-            if let Err(e) = stream_to_file(&mut reader, &path, compression_level) {
+            if let Err(e) = stream_to_file(&mut reader, &path) {
                 reader.disconnect_with_error(e);
             }
         });
-        Box::new(writer)
+        Ok(Box::new(writer))
     }
 }
 
 fn stream_from_file(writer: &mut pipe::Writer, path: &Path) -> io::Result<()> {
     let file = fs::File::open(path)?;
-    let decoder = zstd::Decoder::new(file)?;
-    writer.copy_all_from_reader(decoder).map(|_| ())
+    writer.copy_all_from_reader(file).map(|_| ())
 }
 
-fn stream_to_file(
-    reader: &mut pipe::Reader,
-    path: &Path,
-    compression_level: i32,
-) -> io::Result<()> {
+fn stream_to_file(reader: &mut pipe::Reader, path: &Path) -> io::Result<()> {
     let file = fs::File::create(path)?;
-    let mut encoder = zstd::Encoder::new(file, compression_level)?;
-    reader.copy_all_to_writer(&mut encoder)?;
-    encoder.finish()?;
+    reader.copy_all_to_writer(file)?;
     Ok(())
 }
 

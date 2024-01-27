@@ -26,7 +26,11 @@ pub fn run(config: Config) -> anyhow::Result<()> {
 
     let tree = Tree::new(root_entry.children);
     let version = Version::new(tree);
-    driver.config.medium.save_version(version)?;
+    let version_bytes = version.encode_to_bytes();
+    driver
+        .config
+        .medium
+        .save_version(version_bytes, version.timestamp())?;
     Ok(())
 }
 
@@ -50,9 +54,12 @@ impl CurrentBlock {
 
 impl<'a> Driver<'a> {
     pub fn new(config: Config<'a>) -> anyhow::Result<Self> {
-        let latest_version = config.medium.load_version(0)?;
+        let latest_version = config
+            .medium
+            .load_version(0)?
+            .map(|v| Version::decode(&v[..]));
         let known_chunks = match latest_version {
-            Some(v) => load_known_chunks_from_version(&v),
+            Some(v) => load_known_chunks_from_version(&v?),
             None => HashMap::new(),
         };
 
@@ -143,7 +150,7 @@ impl<'a> Driver<'a> {
         }
 
         let id = BlockId::new();
-        let writer = self.config.medium.save_block(id);
+        let writer = self.config.medium.save_block(id)?;
         Ok(self.current_block.insert(CurrentBlock {
             id,
             writer,

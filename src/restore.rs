@@ -255,7 +255,7 @@ impl<'a> Driver<'a> {
         let source_block = match &mut self.current_block {
             Some(cached) if cached.id == chunk.location.block => cached,
             _ => {
-                let reader = self.medium.load_block(chunk.location.block);
+                let reader = self.medium.load_block(chunk.location.block)?;
                 self.current_block.insert(CurrentBlock {
                     reader,
                     id: chunk.location.block,

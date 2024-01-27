@@ -4,6 +4,7 @@ use crate::Permissions;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt::{Display, Formatter};
+use std::io::{Read, Write};
 use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
@@ -49,6 +50,20 @@ impl Version {
             timestamp: Utc::now(),
             tree,
         }
+    }
+
+    pub fn encode(&self, writer: impl Write) -> anyhow::Result<()> {
+        ciborium::into_writer(self, writer).map_err(anyhow::Error::from)
+    }
+
+    pub fn encode_to_bytes(&self) -> Vec<u8> {
+        let mut buf = Vec::new();
+        self.encode(&mut buf).expect("Vec is an infallible writer");
+        buf
+    }
+
+    pub fn decode(reader: impl Read) -> anyhow::Result<Self> {
+        ciborium::from_reader(reader).map_err(anyhow::Error::from)
     }
 
     pub fn timestamp(&self) -> DateTime<Utc> {

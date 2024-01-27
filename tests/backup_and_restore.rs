@@ -1,7 +1,9 @@
 use anyhow::Context;
 use fs_err as fs;
+use ozymandias::medium::compressing::{CompressingMedium, CompressionType};
 use ozymandias::medium::local::LocalMedium;
 use ozymandias::medium::Medium;
+use ozymandias::model::Version;
 use ozymandias::{backup, restore};
 use std::iter;
 use tempfile::tempdir;
@@ -18,7 +20,6 @@ fn backup_and_restore() -> anyhow::Result<()> {
 
     let file_a_contents = "foobarbaz";
     let file_b_contents = "ozymandias".repeat(1024 * 64);
-    let start = std::time::Instant::now();
     let file_c_contents: Vec<u8> = iter::repeat_with(rand::random::<u8>)
         .take(1024 * 1024 * 256)
         .collect();
@@ -27,17 +28,20 @@ fn backup_and_restore() -> anyhow::Result<()> {
     fs::write(src_dir.path().join("b"), &file_b_contents)?;
     fs::write(src_dir.path().join("c"), &file_c_contents)?;
 
-    let medium = LocalMedium::new(
-        backup_dir.path(),
-        "the_backup",
-        zstd::DEFAULT_COMPRESSION_LEVEL,
-    )?;
+    let medium = LocalMedium::new(backup_dir.path(), "the_backup")?;
+    let medium = CompressingMedium::new(
+        medium,
+        CompressionType::Zstd {
+            compression_level: zstd::DEFAULT_COMPRESSION_LEVEL,
+        },
+    );
 
     backup::run(backup::Config {
         source_dir: src_dir.path().to_path_buf(),
         medium: &medium,
     })?;
     let version = medium.load_version(0)?.context("version not created")?;
+    let version = Version::decode(&version[..])?;
     restore::run(&medium, &version, restore_dir.path())?;
 
     let a = fs::read(restore_dir.path().join("a"))?;
