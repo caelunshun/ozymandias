@@ -92,8 +92,8 @@ impl Medium for LocalMedium {
 
 fn stream_from_file(writer: &mut pipe::Writer, path: &Path) -> io::Result<()> {
     let file = fs::File::open(path)?;
-    io::copy(&mut zstd::Decoder::new(file)?, writer)?;
-    Ok(())
+    let decoder = zstd::Decoder::new(file)?;
+    writer.copy_all_from_reader(decoder).map(|_| ())
 }
 
 fn stream_to_file(
@@ -103,7 +103,7 @@ fn stream_to_file(
 ) -> io::Result<()> {
     let file = fs::File::create(path)?;
     let mut encoder = zstd::Encoder::new(file, compression_level)?;
-    io::copy(reader, &mut encoder)?;
+    reader.copy_all_to_writer(&mut encoder)?;
     encoder.finish()?;
     Ok(())
 }

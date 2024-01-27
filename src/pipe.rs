@@ -7,11 +7,11 @@
 use anyhow::anyhow;
 use diatomic_waker::{WakeSink, WakeSource};
 use rtrb::{Consumer, Producer, RingBuffer};
-use std::io::{Error, Read, Write};
-use std::pin::Pin;
+use std::io::{Cursor, Error, IoSlice, Read, Write};
+use std::pin::{pin, Pin};
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
-use std::{io, mem};
+use std::task::{ready, Context, Poll};
+use std::{future, io, mem};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 /// Constructs a pipe with the provided buffer size.
@@ -76,24 +76,45 @@ impl Writer {
         *self.writer_error.lock().unwrap() = Some(error);
         drop(self);
     }
-}
 
-impl Write for Writer {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        pollster::block_on(<Self as AsyncWriteExt>::write(self, buf))
+    /// This method allows putting data directly into the pipe
+    /// from a `Read` instance. This avoids the need for an intermediate
+    /// buffer and copy (as used by `io::copy`) when moving data into the pipe.
+    ///
+    /// Returns the number of bytes copied from the reader, which is 0 if an end
+    /// of stream was encountered.
+    pub fn copy_from_reader(&mut self, reader: impl Read + Unpin) -> io::Result<usize> {
+        let reader = NaiveAsyncReadAdapter::new(reader);
+        let mut reader = pin!(reader);
+        pollster::block_on(future::poll_fn(|cx| {
+            self.poll_copy_from_reader(cx, reader.as_mut())
+        }))
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
-        pollster::block_on(<Self as AsyncWriteExt>::flush(self))
+    /// Like `copy_from_reader`, but keeps copying until either an EOF
+    /// is reached or an error occurs.
+    ///
+    /// Returns the total number of bytes written to the pipe.
+    ///
+    /// Returns `Ok` if the end of stream in `reader` is reached.
+    /// Returns `Err` if the reader returns an error, or if an error
+    /// is propagated from the other side of the pipe.
+    pub fn copy_all_from_reader(&mut self, mut reader: impl Read + Unpin) -> io::Result<u64> {
+        let mut bytes_written = 0;
+        loop {
+            match self.copy_from_reader(&mut reader) {
+                Ok(0) => return Ok(bytes_written), // EOF
+                Ok(n) => bytes_written += u64::try_from(n).unwrap(),
+                Err(e) => return Err(e),
+            }
+        }
     }
-}
 
-impl AsyncWrite for Writer {
-    fn poll_write(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-        buf: &[u8],
-    ) -> Poll<Result<usize, Error>> {
+    fn poll_copy_from_reader<R: AsyncRead>(
+        &mut self,
+        cx: &mut Context,
+        reader: Pin<&mut R>,
+    ) -> Poll<io::Result<usize>> {
         // These registrations must take place before we check
         // the ring buffer; see comment in Reader::async_read.
         let waker = cx.waker();
@@ -119,24 +140,35 @@ impl AsyncWrite for Writer {
         let mut chunk = producer
             .write_chunk(num_bytes)
             .expect("num_bytes available for writing");
-        let (chunk_a, chunk_b) = chunk.as_mut_slices();
+        let (chunk_a, _) = chunk.as_mut_slices();
 
-        let mut bytes_written = 0;
-
-        let bytes_to_write = chunk_a.len().min(buf.len());
-        chunk_a[..bytes_to_write].copy_from_slice(&buf[..bytes_to_write]);
-        bytes_written += bytes_to_write;
-        let buf = &buf[bytes_to_write..];
-
-        if bytes_to_write == chunk_a.len() {
-            let bytes_to_write = chunk_b.len().min(buf.len());
-            chunk_b[..bytes_to_write].copy_from_slice(&buf[..bytes_to_write]);
-            bytes_written += bytes_to_write;
-        }
+        let mut buf = ReadBuf::new(chunk_a);
+        ready!(reader.poll_read(cx, &mut buf))?;
+        let bytes_written = buf.filled().len();
 
         chunk.commit(bytes_written);
         self.writer_progress.notify();
         Poll::Ready(Ok(bytes_written))
+    }
+}
+
+impl Write for Writer {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        pollster::block_on(<Self as AsyncWriteExt>::write(self, buf))
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        pollster::block_on(<Self as AsyncWriteExt>::flush(self))
+    }
+}
+
+impl AsyncWrite for Writer {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        mut buf: &[u8],
+    ) -> Poll<Result<usize, Error>> {
+        self.poll_copy_from_reader(cx, Pin::new(&mut buf))
     }
 
     fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
@@ -197,6 +229,81 @@ impl Reader {
         *self.reader_error.lock().unwrap() = Some(error);
         drop(self);
     }
+
+    /// This method allows writing data directly from the pipe's
+    /// internal buffer to a provided `Write` instance.
+    /// Compared to `io::copy`, this avoids the use of an intermediate
+    /// buffer and copy.
+    ///
+    /// Returns the number of bytes written to the writer.
+    /// Use `copy_all_to_writer` to copy all bytes from the pipe
+    /// until the stream becomes empty.
+    pub fn copy_to_writer<W: Write + Unpin>(&mut self, writer: W) -> io::Result<usize> {
+        let mut writer = NaiveAsyncWriteAdapter::new(writer);
+        let mut writer = Pin::new(&mut writer);
+
+        let fut = future::poll_fn(|cx| self.poll_copy_to_writer(cx, writer.as_mut()));
+        pollster::block_on(fut)
+    }
+
+    /// Copies data from the pipe to the provided writer
+    /// until the reader disconnects or an error is encountered
+    /// on either side of the pipe.
+    ///
+    /// Returns the total number of bytes read from the pipe.
+    pub fn copy_all_to_writer<W: Write + Unpin>(&mut self, mut writer: W) -> io::Result<u64> {
+        let mut bytes_read = 0;
+        loop {
+            match self.copy_to_writer(&mut writer) {
+                Ok(0) => return Ok(bytes_read),
+                Ok(n) => bytes_read += u64::try_from(n).unwrap(),
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    fn poll_copy_to_writer<W: AsyncWrite>(
+        &mut self,
+        cx: &mut Context,
+        writer: Pin<&mut W>,
+    ) -> Poll<io::Result<usize>> {
+        // These registrations must take place _before_ we check
+        // the ring buffer. Otherwise, there is a race condition
+        // where we check the buffer and find it is empty,
+        // then the writer adds data before we call register(),
+        // causing the reader not to receive any notification for the new data.
+        let waker = cx.waker();
+        self.writer_drop.register(waker);
+        self.writer_progress.register(waker);
+
+        let consumer = &mut self.consumer;
+
+        if consumer.is_empty() {
+            return if consumer.is_abandoned() {
+                if let Some(error) = self.writer_error.lock().unwrap().take() {
+                    Poll::Ready(Err(error))
+                } else {
+                    // EOF, zero bytes read
+                    Poll::Ready(Ok(0))
+                }
+            } else {
+                Poll::Pending
+            };
+        }
+
+        let num_bytes = consumer.slots();
+        let chunk = consumer.read_chunk(num_bytes).expect("num_bytes available");
+        let (chunk_a, chunk_b) = chunk.as_slices();
+
+        let bytes_consumed = ready!(
+            writer.poll_write_vectored(cx, &[IoSlice::new(chunk_a), IoSlice::new(chunk_b)])
+        )?;
+
+        chunk.commit(bytes_consumed);
+        self.reader_progress.notify();
+
+        Poll::Ready(Ok(bytes_consumed))
+    }
 }
 
 impl Read for Reader {
@@ -224,50 +331,77 @@ impl AsyncRead for Reader {
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        // These registrations must take place _before_ we check
-        // the ring buffer. Otherwise, there is a race condition
-        // where we check the buffer and find it is empty,
-        // then the writer adds data before we call register(),
-        // causing the reader not to receive any notification for the new data.
-        let waker = cx.waker();
-        self.writer_drop.register(waker);
-        self.writer_progress.register(waker);
-
-        let consumer = &mut self.consumer;
-
-        if consumer.is_empty() {
-            return if consumer.is_abandoned() {
-                if let Some(error) = self.writer_error.lock().unwrap().take() {
-                    Poll::Ready(Err(error))
-                } else {
-                    // EOF: return Ok(()) without writing any data to `buf`.
-                    Poll::Ready(Ok(()))
-                }
-            } else {
-                Poll::Pending
-            };
-        }
-
-        let num_bytes = consumer.slots();
-        let chunk = consumer.read_chunk(num_bytes).expect("num_bytes available");
-        let (chunk_a, chunk_b) = chunk.as_slices();
-
-        let mut bytes_consumed = 0;
-
-        let bytes_to_consume = chunk_a.len().min(buf.remaining());
-        buf.put_slice(&chunk_a[..bytes_to_consume]);
-        bytes_consumed += bytes_to_consume;
-
-        if bytes_to_consume == chunk_a.len() {
-            let bytes_to_consume = chunk_b.len().min(buf.remaining());
-            buf.put_slice(&chunk_b[..bytes_to_consume]);
-            bytes_consumed += bytes_to_consume;
-        }
-
-        chunk.commit(bytes_consumed);
-        self.reader_progress.notify();
-
+        let old_filled = buf.filled().len();
+        let writer = Cursor::new(buf.initialize_unfilled());
+        let writer = pin!(writer);
+        let bytes_read = ready!(self.poll_copy_to_writer(cx, writer))?;
+        buf.set_filled(old_filled + bytes_read);
         Poll::Ready(Ok(()))
+    }
+}
+
+/// Wrapper over a `Read` instance that naively implements `AsyncRead`.
+/// This should never be used inside an actual async runtime
+/// as it will block the runtime thread on IO operations.
+///
+/// We use this in the blocking (non-async) pipe methods
+/// to adapt a `Read` to an `AsyncRead` so that the async implementation
+/// can be reused for sync operations.
+struct NaiveAsyncReadAdapter<R> {
+    reader: R,
+}
+
+impl<R> NaiveAsyncReadAdapter<R> {
+    pub fn new(reader: R) -> Self {
+        Self { reader }
+    }
+}
+
+impl<R> AsyncRead for NaiveAsyncReadAdapter<R>
+where
+    R: Read + Unpin,
+{
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<io::Result<()>> {
+        let old_filled = buf.filled().len();
+        let num_bytes = self.reader.read(buf.initialize_unfilled())?;
+        buf.set_filled(old_filled + num_bytes);
+        Poll::Ready(Ok(()))
+    }
+}
+
+/// Analagous to `NaiveAsyncReadAdapter`.
+struct NaiveAsyncWriteAdapter<W> {
+    writer: W,
+}
+
+impl<W> NaiveAsyncWriteAdapter<W> {
+    pub fn new(writer: W) -> Self {
+        Self { writer }
+    }
+}
+
+impl<W> AsyncWrite for NaiveAsyncWriteAdapter<W>
+where
+    W: Write + Unpin,
+{
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        _cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, Error>> {
+        Poll::Ready(self.writer.write(buf))
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        Poll::Ready(self.writer.flush())
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), Error>> {
+        Poll::Ready(self.writer.flush())
     }
 }
 
