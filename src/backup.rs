@@ -24,16 +24,7 @@ pub struct Config<'a> {
 pub fn run(config: Config) -> anyhow::Result<()> {
     let mut driver = Driver::new(config)?;
     let root_entry = driver.back_up_dir(&driver.config.source_dir.clone())?;
-
-    let tree = Tree::new(root_entry.children);
-    let version = Version::new(tree);
-    let version_bytes = version.encode_to_bytes();
-    driver
-        .config
-        .medium
-        .save_version(version_bytes, version.timestamp())?;
-    driver.finish()?;
-
+    driver.finish(root_entry)?;
     Ok(())
 }
 
@@ -88,7 +79,6 @@ impl<'a> Driver<'a> {
     }
 
     fn back_up_path(&mut self, path: &Path) -> anyhow::Result<TreeEntry> {
-        dbg!(path);
         let result = match fs::metadata(path)?.file_type() {
             f if f.is_file() => self.back_up_file(path).map(TreeEntry::File),
             f if f.is_dir() => self.back_up_dir(path).map(TreeEntry::Directory),
@@ -113,11 +103,20 @@ impl<'a> Driver<'a> {
         })
     }
 
-    pub fn finish(mut self) -> anyhow::Result<()> {
+    pub fn finish(mut self, root_entry: DirectoryEntry) -> anyhow::Result<()> {
         if let Some(mut current_block) = self.current_block.take() {
             current_block.writer.flush()?;
         }
+        // Ensure all data is durably written before committing the new version file.
         self.config.medium.flush()?;
+
+        let tree = Tree::new(root_entry.children);
+        let version = Version::new(tree);
+        let version_bytes = version.encode_to_bytes();
+        self.config
+            .medium
+            .save_version(version_bytes, version.timestamp())?;
+
         Ok(())
     }
 

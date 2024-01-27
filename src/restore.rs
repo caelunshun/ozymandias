@@ -52,7 +52,7 @@ impl Plan {
     /// when possible.
     ///
     /// Additionally, chunks within a block will be ordered according to their offset
-    /// within the block. This behavior is required by the`restore `Driver`.
+    /// within the block.
     pub fn post_process(&mut self) {
         self.restore_chunks.sort_unstable_by_key(|restore_chunk| {
             (

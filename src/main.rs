@@ -6,7 +6,9 @@ use ozymandias::medium::s3::S3Medium;
 use ozymandias::medium::Medium;
 use ozymandias::model::Version;
 use ozymandias::{backup, restore};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+
+mod daemon;
 
 #[derive(Debug, Parser)]
 struct Cli {
@@ -24,7 +26,7 @@ struct Cli {
     #[arg(long)]
     storage_dir: Option<PathBuf>,
     #[arg(long)]
-    backup_name: String,
+    backup_name: Option<String>,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, ValueEnum)]
@@ -37,6 +39,10 @@ enum MediumConfig {
 enum Command {
     Backup(BackupArgs),
     Restore(RestoreArgs),
+    Daemon {
+        #[arg(long)]
+        config: PathBuf,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -53,11 +59,23 @@ struct RestoreArgs {
 
 pub fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
-    let medium = create_medium(&cli)?;
 
     match &cli.command {
-        Command::Backup(args) => do_backup(&*medium, args)?,
-        Command::Restore(args) => do_restore(&*medium, args)?,
+        Command::Backup(args) => {
+            let medium = create_medium(
+                &cli,
+                cli.backup_name.as_ref().context("missing backup name")?,
+            )?;
+            do_backup(&*medium, args)?
+        }
+        Command::Restore(args) => {
+            let medium = create_medium(
+                &cli,
+                cli.backup_name.as_ref().context("missing backup name")?,
+            )?;
+            do_restore(&*medium, args)?
+        }
+        Command::Daemon { config } => run_daemon(&cli, config)?,
     }
 
     Ok(())
@@ -75,14 +93,21 @@ fn do_restore(medium: &dyn Medium, args: &RestoreArgs) -> anyhow::Result<()> {
     restore::run(medium, &version, &args.dir)
 }
 
-fn create_medium(cli: &Cli) -> anyhow::Result<Box<dyn Medium>> {
+fn run_daemon(cli: &Cli, config_path: &Path) -> anyhow::Result<()> {
+    let config =
+        daemon::Config::load(fs_err::File::open(config_path)?).context("malformed config")?;
+    daemon::run(config, |backup_name| create_medium(cli, backup_name))?;
+    Ok(())
+}
+
+fn create_medium(cli: &Cli, backup_name: &str) -> anyhow::Result<Box<dyn Medium>> {
     match &cli.medium {
         MediumConfig::Local => {
             let medium = LocalMedium::new(
                 cli.storage_dir
                     .as_ref()
                     .context("missing target dir for local medium")?,
-                &cli.backup_name,
+                backup_name,
             )?;
             Ok(wrap_medium(medium, cli))
         }
@@ -101,7 +126,7 @@ fn create_medium(cli: &Cli) -> anyhow::Result<Box<dyn Medium>> {
                 cli.bucket
                     .as_ref()
                     .context("missing bucket for S3 medium")?,
-                &cli.backup_name,
+                backup_name,
             );
             Ok(wrap_medium(medium, cli))
         }
