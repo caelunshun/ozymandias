@@ -48,4 +48,7 @@ pub trait Medium: Send + Sync + 'static {
     /// Data to be written to the new block should be written
     /// to the returned writer.
     fn save_block(&self, block_id: BlockId) -> anyhow::Result<Box<dyn Write + Send>>;
+
+    /// Waits on all running asynchronous operations to complete.
+    fn flush(&self) -> anyhow::Result<()>;
 }

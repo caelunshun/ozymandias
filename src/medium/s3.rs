@@ -7,11 +7,15 @@ use aws_config::SdkConfig;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::Client;
 use chrono::{DateTime, Utc};
+use pollster::FutureExt;
+use std::future::Future;
 use std::io::{Read, Write};
+use std::sync::Mutex;
 use std::{cmp, io};
 use tokio::io::AsyncReadExt;
 use tokio::runtime;
 use tokio::runtime::Runtime;
+use tokio::task::JoinHandle;
 
 /// Medium that stores data on an S3-compatible object store.
 pub struct S3Medium {
@@ -19,6 +23,8 @@ pub struct S3Medium {
     subdirectory: String,
     s3_client: Client,
     tokio_handle: Runtime,
+
+    tasks_needing_wait: Mutex<Vec<JoinHandle<()>>>,
 }
 
 impl S3Medium {
@@ -35,6 +41,7 @@ impl S3Medium {
             subdirectory: backup_name.to_owned(),
             s3_client,
             tokio_handle,
+            tasks_needing_wait: Default::default(),
         }
     }
 
@@ -61,11 +68,16 @@ impl S3Medium {
     fn object_key_for_block(&self, block_id: BlockId) -> String {
         format!("{}/{BLOCKS_DIR}/{block_id}", self.subdirectory)
     }
+
+    fn spawn_task(&self, task: impl Future<Output = ()> + Send + 'static) {
+        let task = self.tokio_handle.spawn(task);
+        self.tasks_needing_wait.lock().unwrap().push(task);
+    }
 }
 
 impl Medium for S3Medium {
     fn load_version(&self, n: u64) -> anyhow::Result<Option<Vec<u8>>> {
-        let versions = self.tokio_handle.block_on(
+        let response = self.tokio_handle.block_on(
             self.s3_client
                 .list_objects_v2()
                 .bucket(&self.bucket)
@@ -73,9 +85,9 @@ impl Medium for S3Medium {
                 .send(),
         )?;
 
-        let mut versions: Vec<_> = versions
+        let mut versions: Vec<_> = response
             .contents
-            .context("malformed S3 response")?
+            .unwrap_or_default()
             .into_iter()
             .map(|object| {
                 let key = object.key.context("missing object key")?;
@@ -85,7 +97,7 @@ impl Medium for S3Medium {
             .collect::<Result<_, anyhow::Error>>()?;
         versions.sort_by_key(|(date, _)| cmp::Reverse(*date));
 
-        if n as usize > versions.len() {
+        if n as usize >= versions.len() {
             return Ok(None);
         }
 
@@ -137,12 +149,19 @@ impl Medium for S3Medium {
         let bucket = self.bucket.clone();
         let key = self.object_key_for_block(block_id);
 
-        self.tokio_handle.spawn(async move {
+        self.spawn_task(async move {
             if let Err(e) = stream_object_to_s3(&mut reader, &s3_client, &bucket, &key).await {
                 reader.disconnect_with_error(anyhow_error_to_io(e));
             }
         });
         Ok(Box::new(writer))
+    }
+
+    fn flush(&self) -> anyhow::Result<()> {
+        for task in self.tasks_needing_wait.lock().unwrap().drain(..) {
+            task.block_on().expect("task panicked");
+        }
+        Ok(())
     }
 }
 
@@ -166,10 +185,12 @@ async fn stream_object_to_s3(
 ) -> anyhow::Result<()> {
     // To enable retriability, we unfortunately need to
     // collect the whole buffer into memory.
+    dbg!();
     let mut buf = Vec::new();
     AsyncReadExt::read_to_end(pipe, &mut buf).await?;
     let body = ByteStream::from(buf);
 
+    dbg!();
     client
         .put_object()
         .bucket(bucket)
@@ -177,6 +198,8 @@ async fn stream_object_to_s3(
         .body(body)
         .send()
         .await?;
+    dbg!();
+
     Ok(())
 }
 

@@ -10,8 +10,8 @@ homepage = "https://github.com/caelunshun/ozymandias"
 
 [dependencies]
 anyhow = "1"
-aws-config = "1"
-aws-sdk-s3 = "1"
+aws-config = { version = "1", features = ["behavior-version-latest"] }
+aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 blake3 = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 ciborium = "0.2"

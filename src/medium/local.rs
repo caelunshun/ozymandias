@@ -77,6 +77,10 @@ impl Medium for LocalMedium {
         });
         Ok(Box::new(writer))
     }
+
+    fn flush(&self) -> anyhow::Result<()> {
+        Ok(())
+    }
 }
 
 fn stream_from_file(writer: &mut pipe::Writer, path: &Path) -> io::Result<()> {

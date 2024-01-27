@@ -31,6 +31,8 @@ pub fn run(config: Config) -> anyhow::Result<()> {
         .config
         .medium
         .save_version(version_bytes, version.timestamp())?;
+    driver.finish()?;
+
     Ok(())
 }
 
@@ -91,6 +93,14 @@ impl<'a> Driver<'a> {
             permissions: get_file_permissions(path)?,
             children,
         })
+    }
+
+    pub fn finish(mut self) -> anyhow::Result<()> {
+        if let Some(mut current_block) = self.current_block.take() {
+            current_block.writer.flush()?;
+        }
+        self.config.medium.flush()?;
+        Ok(())
     }
 
     fn back_up_file(&mut self, path: &Path) -> anyhow::Result<FileEntry> {

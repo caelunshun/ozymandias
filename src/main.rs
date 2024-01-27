@@ -22,7 +22,7 @@ struct Cli {
     #[arg(long)]
     bucket: Option<String>,
     #[arg(long)]
-    target_dir: Option<PathBuf>,
+    storage_dir: Option<PathBuf>,
     #[arg(long)]
     backup_name: String,
 }
@@ -56,8 +56,8 @@ pub fn main() -> anyhow::Result<()> {
     let medium = create_medium(&cli)?;
 
     match &cli.command {
-        Command::Backup(args) => do_backup(&medium, args)?,
-        Command::Restore(args) => do_restore(&medium, args)?,
+        Command::Backup(args) => do_backup(&*medium, args)?,
+        Command::Restore(args) => do_restore(&*medium, args)?,
     }
 
     Ok(())
@@ -79,7 +79,7 @@ fn create_medium(cli: &Cli) -> anyhow::Result<Box<dyn Medium>> {
     match &cli.medium {
         MediumConfig::Local => {
             let medium = LocalMedium::new(
-                cli.target_dir
+                cli.storage_dir
                     .as_ref()
                     .context("missing target dir for local medium")?,
                 &cli.backup_name,

@@ -70,6 +70,10 @@ where
         encode_header(self.compression_type, &mut writer)?;
         self.compression_type.wrap_writer(writer)
     }
+
+    fn flush(&self) -> anyhow::Result<()> {
+        self.inner.flush()
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
