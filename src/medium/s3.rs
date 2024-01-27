@@ -134,7 +134,7 @@ impl Medium for S3Medium {
         let bucket = self.bucket.clone();
         let key = self.object_key_for_block(block_id);
 
-        self.tokio_handle.spawn(async move {
+        self.spawn_task(async move {
             if let Err(e) = stream_object_from_s3(&mut writer, &s3_client, &bucket, &key).await {
                 writer.disconnect_with_error(anyhow_error_to_io(e));
             }

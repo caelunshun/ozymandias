@@ -1,6 +1,7 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use ozymandias::medium::compressing::{CompressingMedium, CompressionType};
+use ozymandias::medium::encrypting::EncryptingMedium;
 use ozymandias::medium::local::LocalMedium;
 use ozymandias::medium::s3::S3Medium;
 use ozymandias::medium::Medium;
@@ -18,6 +19,8 @@ struct Cli {
     medium: MediumConfig,
     #[arg(short = 'c', long, default_value_t = zstd::DEFAULT_COMPRESSION_LEVEL)]
     compression_level: i32,
+    #[arg(short = 'p', long)]
+    password: Option<String>,
 
     #[arg(long)]
     s3_endpoint_url: Option<String>,
@@ -133,12 +136,16 @@ fn create_medium(cli: &Cli, backup_name: &str) -> anyhow::Result<Box<dyn Medium>
     }
 }
 
-/// Wraps a medium in the default set of composing mediums.
+/// Wraps a medium in the required set of composing mediums.
 fn wrap_medium(medium: impl Medium, cli: &Cli) -> Box<dyn Medium> {
-    Box::new(CompressingMedium::new(
+    // Note: ensure that encryption happens _after_ compression
+    // (otherwise compression is useless).
+    let medium = EncryptingMedium::with_password(medium, cli.password.as_deref());
+    let medium = CompressingMedium::new(
         medium,
         CompressionType::Zstd {
             compression_level: cli.compression_level,
         },
-    ))
+    );
+    Box::new(medium)
 }

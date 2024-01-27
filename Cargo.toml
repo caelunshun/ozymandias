@@ -1,6 +1,6 @@
 [package]
 name = "ozymandias"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2021"
 description = "Alpha-quality backup program."
 license = "GPL-3.0-or-later"
@@ -9,7 +9,10 @@ repository = "https://github.com/caelunshun/ozymandias"
 homepage = "https://github.com/caelunshun/ozymandias"
 
 [dependencies]
+aead = { version = "0.5", features = ["stream"] }
+aes-gcm-siv = "0.11"
 anyhow = "1"
+argon2 = "0.5"
 aws-config = { version = "1", features = ["behavior-version-latest"] }
 aws-sdk-s3 = { version = "1", features = ["behavior-version-latest"] }
 blake3 = { version = "1", features = ["serde"] }

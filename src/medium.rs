@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use std::io::{Read, Write};
 
 pub mod compressing;
+pub mod encrypting;
 pub mod local;
 pub mod s3;
 

@@ -1,6 +1,7 @@
 use anyhow::Context;
 use fs_err as fs;
 use ozymandias::medium::compressing::{CompressingMedium, CompressionType};
+use ozymandias::medium::encrypting::EncryptingMedium;
 use ozymandias::medium::local::LocalMedium;
 use ozymandias::medium::Medium;
 use ozymandias::model::Version;
@@ -27,6 +28,7 @@ fn backup_and_restore() -> anyhow::Result<()> {
     fs::write(src_dir.path().join("c"), &file_c_contents)?;
 
     let medium = LocalMedium::new(backup_dir.path(), "the_backup")?;
+    let medium = EncryptingMedium::with_password(medium, Some("ozymandias123"));
     let medium = CompressingMedium::new(
         medium,
         CompressionType::Zstd {

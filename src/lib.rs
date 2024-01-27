@@ -9,6 +9,7 @@ pub mod medium;
 pub mod model;
 mod pipe;
 pub mod restore;
+mod streaming_crypto;
 
 /// File permissions. `None` when files are sourced from non-Unix systems.
 type Permissions = Option<u32>;
