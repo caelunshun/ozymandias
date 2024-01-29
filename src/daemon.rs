@@ -56,8 +56,8 @@ pub fn run(
     loop {
         if let Err(e) = run_inner(&config, &mut build_medium_with_backup_name) {
             eprintln!("Error occurred: {e}");
-            eprintln!("Will restart after 30 seconds.");
-            std::thread::sleep(std::time::Duration::from_secs(30));
+            eprintln!("Will restart after 15 minutes.");
+            std::thread::sleep(std::time::Duration::from_secs(60 * 15));
         }
     }
 }

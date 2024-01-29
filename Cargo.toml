@@ -1,6 +1,6 @@
 [package]
 name = "ozymandias"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Alpha-quality backup program."
 license = "GPL-3.0-or-later"
@@ -24,7 +24,6 @@ flume = "0.11"
 fs-err = "2"
 hex = "0.4"
 humansize = "2"
-indexmap = { version = "2", features = ["serde"] }
 indicatif = "0.17"
 pollster = "0.3"
 rand = "0.8"
