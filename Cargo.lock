@@ -1790,7 +1790,7 @@ checksum = "4030760ffd992bef45b0ae3f10ce1aba99e33464c90d14dd7c039884963ddc7a"
 
 [[package]]
 name = "ozymandias"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "aead",
  "aes-gcm-siv",
