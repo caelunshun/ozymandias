@@ -19,13 +19,13 @@ blake3 = { version = "1", features = ["serde"] }
 chrono = { version = "0.4", features = ["serde"] }
 ciborium = "0.2"
 clap = { version = "4", features = ["derive"] }
-diatomic-waker = "0.1"
+diatomic-waker = "0.2"
 flume = "0.11"
-fs-err = "2"
+fs-err = "3"
 hex = "0.4"
 humansize = "2"
 indicatif = "0.17"
-pollster = "0.3"
+pollster = "0.4"
 rand = "0.8"
 rayon = "1"
 ron = "0.8"
@@ -36,7 +36,7 @@ uuid = { version = "1", features = ["v7", "serde"] }
 zstd = { version = "0.13", features = ["zstdmt"] }
 
 [dev-dependencies]
-rstest = "0.18"
+rstest = "0.23"
 tempfile = "3"
 
 [profile.dev.package.'*']

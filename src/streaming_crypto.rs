@@ -234,7 +234,6 @@ mod tests {
     use crate::MiB;
     use aead::generic_array::GenericArray;
     use aead::KeyInit;
-    use std::io::Cursor;
 
     #[test]
     fn roundtrip() {

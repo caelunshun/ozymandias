@@ -77,17 +77,29 @@ impl S3Medium {
 
 impl Medium for S3Medium {
     fn load_version(&self, n: u64) -> anyhow::Result<Option<Vec<u8>>> {
-        let response = self.tokio_handle.block_on(
-            self.s3_client
+        // List all objects in bucket with pagination
+        let mut objects = Vec::new();
+        let mut cont_token = None;
+        loop {
+            let mut builder = self
+                .s3_client
                 .list_objects_v2()
                 .bucket(&self.bucket)
-                .prefix(self.versions_dir_prefix())
-                .send(),
-        )?;
+                .prefix(self.versions_dir_prefix());
+            if let Some(token) = &cont_token {
+                builder = builder.continuation_token(token);
+            }
+            let response = self.tokio_handle.block_on(builder.send())?;
 
-        let mut versions: Vec<_> = response
-            .contents
-            .unwrap_or_default()
+            objects.extend(response.contents.unwrap_or_default());
+
+            cont_token = response.next_continuation_token;
+            if cont_token.is_none() {
+                break;
+            }
+        }
+
+        let mut versions: Vec<_> = objects
             .into_iter()
             .map(|object| {
                 let key = object.key.context("missing object key")?;
