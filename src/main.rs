@@ -8,8 +8,12 @@ use ozymandias::medium::Medium;
 use ozymandias::model::Version;
 use ozymandias::{backup, restore};
 use std::path::{Path, PathBuf};
+use jemallocator::Jemalloc;
 
 mod daemon;
+
+#[global_allocator]
+static ALLOCATOR: Jemalloc = Jemalloc;
 
 #[derive(Debug, Parser)]
 struct Cli {
