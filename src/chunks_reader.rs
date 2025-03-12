@@ -1,6 +1,8 @@
 use crate::IO_BUFFER_SIZE;
-use std::io;
-use std::io::{BufReader, Read};
+use std::{
+    io,
+    io::{BufReader, Read},
+};
 
 /// Reads chunks of a provided size from an `io::Read`.
 ///

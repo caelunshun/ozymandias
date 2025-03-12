@@ -1,9 +1,14 @@
 use crate::KiB;
-use aead::stream::{DecryptorLE31, EncryptorLE31, Nonce, StreamLE31};
-use aead::Key;
+use aead::{
+    stream::{DecryptorLE31, EncryptorLE31, Nonce, StreamLE31},
+    Key,
+};
 use aes_gcm_siv::Aes256GcmSiv;
-use std::io::{Read, Write};
-use std::{io, iter};
+use std::{
+    io,
+    io::{Read, Write},
+    iter,
+};
 
 const APPROX_MESSAGE_SIZE: usize = 128 * KiB;
 const LENGTH_PREFIX_SIZE: usize = 4;
@@ -232,8 +237,7 @@ where
 mod tests {
     use super::*;
     use crate::MiB;
-    use aead::generic_array::GenericArray;
-    use aead::KeyInit;
+    use aead::{generic_array::GenericArray, KeyInit};
 
     #[test]
     fn roundtrip() {

@@ -11,14 +11,19 @@
 //!
 //! TODO: remaining issue: correctly handle when an existing file is larger than the stored file
 
-use crate::medium::Medium;
-use crate::model::{BlockId, ChunkHash, ChunkLocation, FileEntry, Tree, TreeEntry, Version};
-use crate::MAX_RESTORE_CHUNK_SIZE;
+use crate::{
+    medium::Medium,
+    model::{BlockId, ChunkHash, ChunkLocation, FileEntry, Tree, TreeEntry, Version},
+    MAX_RESTORE_CHUNK_SIZE,
+};
 use anyhow::bail;
 use indicatif::{HumanBytes, ProgressBar};
-use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use std::{io, iter};
+use std::{
+    io,
+    io::{Read, Seek, SeekFrom, Write},
+    iter,
+    path::{Path, PathBuf},
+};
 
 pub fn run(
     medium: &dyn Medium,

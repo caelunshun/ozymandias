@@ -1,11 +1,16 @@
 use anyhow::Context;
 use fs_err as fs;
-use ozymandias::medium::compressing::{CompressingMedium, CompressionType};
-use ozymandias::medium::encrypting::EncryptingMedium;
-use ozymandias::medium::local::LocalMedium;
-use ozymandias::medium::Medium;
-use ozymandias::model::Version;
-use ozymandias::{backup, restore};
+use ozymandias::{
+    backup,
+    medium::{
+        compressing::{CompressingMedium, CompressionType},
+        encrypting::EncryptingMedium,
+        local::LocalMedium,
+        Medium,
+    },
+    model::Version,
+    restore,
+};
 use std::iter;
 use tempfile::tempdir;
 

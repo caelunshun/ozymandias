@@ -1,14 +1,19 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use ozymandias::medium::compressing::{CompressingMedium, CompressionType};
-use ozymandias::medium::encrypting::EncryptingMedium;
-use ozymandias::medium::local::LocalMedium;
-use ozymandias::medium::s3::S3Medium;
-use ozymandias::medium::Medium;
-use ozymandias::model::Version;
-use ozymandias::{backup, restore};
-use std::path::{Path, PathBuf};
 use jemallocator::Jemalloc;
+use ozymandias::{
+    backup,
+    medium::{
+        compressing::{CompressingMedium, CompressionType},
+        encrypting::EncryptingMedium,
+        local::LocalMedium,
+        s3::S3Medium,
+        Medium,
+    },
+    model::Version,
+    restore,
+};
+use std::path::{Path, PathBuf};
 
 mod daemon;
 

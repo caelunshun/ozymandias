@@ -1,21 +1,22 @@
 use super::{version_timestamp_from_file_name, BLOCKS_DIR, VERSIONS_DIR};
-use crate::medium::{version_file_name, Medium};
-use crate::model::BlockId;
-use crate::{pipe, IO_BUFFER_SIZE};
+use crate::{
+    medium::{version_file_name, Medium},
+    model::BlockId,
+    pipe, IO_BUFFER_SIZE,
+};
 use anyhow::Context;
 use aws_config::SdkConfig;
-use aws_sdk_s3::primitives::ByteStream;
-use aws_sdk_s3::Client;
+use aws_sdk_s3::{primitives::ByteStream, Client};
 use chrono::{DateTime, Utc};
 use pollster::FutureExt;
-use std::future::Future;
-use std::io::{Read, Write};
-use std::sync::Mutex;
-use std::{cmp, io};
-use tokio::io::AsyncReadExt;
-use tokio::runtime;
-use tokio::runtime::Runtime;
-use tokio::task::JoinHandle;
+use std::{
+    cmp,
+    future::Future,
+    io,
+    io::{Read, Write},
+    sync::Mutex,
+};
+use tokio::{io::AsyncReadExt, runtime, runtime::Runtime, task::JoinSet};
 
 /// Medium that stores data on an S3-compatible object store.
 pub struct S3Medium {
@@ -24,7 +25,7 @@ pub struct S3Medium {
     s3_client: Client,
     tokio_handle: Runtime,
 
-    tasks_needing_wait: Mutex<Vec<JoinHandle<()>>>,
+    tasks_needing_wait: Mutex<JoinSet<()>>,
 }
 
 impl S3Medium {
@@ -70,8 +71,18 @@ impl S3Medium {
     }
 
     fn spawn_task(&self, task: impl Future<Output = ()> + Send + 'static) {
-        let task = self.tokio_handle.spawn(task);
-        self.tasks_needing_wait.lock().unwrap().push(task);
+        let _guard = self.tokio_handle.enter();
+
+        const MAX_PARALLEL_TASKS: usize = 16;
+        let mut tasks_needing_wait = self.tasks_needing_wait.lock().unwrap();
+
+        while tasks_needing_wait.try_join_next().is_some() {}
+
+        if tasks_needing_wait.len() >= MAX_PARALLEL_TASKS {
+            // apply backpressure by flushing a task
+            tasks_needing_wait.join_next().block_on();
+        }
+        tasks_needing_wait.spawn(task);
     }
 }
 
@@ -170,9 +181,8 @@ impl Medium for S3Medium {
     }
 
     fn flush(&self) -> anyhow::Result<()> {
-        for task in self.tasks_needing_wait.lock().unwrap().drain(..) {
-            task.block_on().expect("task panicked");
-        }
+        let mut tasks_needing_wait = self.tasks_needing_wait.lock().unwrap();
+        while tasks_needing_wait.join_next().block_on().is_some() {}
         Ok(())
     }
 }

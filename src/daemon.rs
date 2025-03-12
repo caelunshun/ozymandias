@@ -2,12 +2,9 @@
 
 use anyhow::bail;
 use chrono::{Duration, Utc};
-use ozymandias::backup;
-use ozymandias::medium::Medium;
-use ozymandias::model::Version;
+use ozymandias::{backup, medium::Medium, model::Version};
 use serde::Deserialize;
-use std::io::Read;
-use std::path::PathBuf;
+use std::{io::Read, path::PathBuf};
 
 #[derive(Debug, Deserialize)]
 pub struct Config {

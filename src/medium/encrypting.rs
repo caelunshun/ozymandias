@@ -1,13 +1,17 @@
-use crate::medium::Medium;
-use crate::model::BlockId;
-use crate::streaming_crypto::{ReadEncrypted, WriteEncrypted};
+use crate::{
+    medium::Medium,
+    model::BlockId,
+    streaming_crypto::{ReadEncrypted, WriteEncrypted},
+};
 use aead::generic_array::GenericArray;
 use aes_gcm_siv::{Aes256GcmSiv, Key};
 use anyhow::anyhow;
 use argon2::Argon2;
 use chrono::{DateTime, Utc};
-use std::io;
-use std::io::{Cursor, Read, Write};
+use std::{
+    io,
+    io::{Cursor, Read, Write},
+};
 
 /// A layer that optionally encrypts the data written to the medium.
 pub struct EncryptingMedium<M> {

@@ -1,6 +1,6 @@
 [package]
 name = "ozymandias"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2021"
 description = "Alpha-quality backup program."
 license = "GPL-3.0-or-later"
@@ -38,3 +38,6 @@ tempfile = "3"
 
 [profile.dev.package.'*']
 opt-level = 3
+
+[profile.release]
+debug = true

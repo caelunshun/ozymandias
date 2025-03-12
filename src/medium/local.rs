@@ -1,14 +1,20 @@
-use crate::medium::{
-    block_file_name, version_file_name, version_timestamp_from_file_name, Medium, BLOCKS_DIR,
-    VERSIONS_DIR,
+use crate::{
+    get_file_name,
+    medium::{
+        block_file_name, version_file_name, version_timestamp_from_file_name, Medium, BLOCKS_DIR,
+        VERSIONS_DIR,
+    },
+    model::BlockId,
+    pipe, IO_BUFFER_SIZE,
 };
-use crate::model::BlockId;
-use crate::{get_file_name, pipe, IO_BUFFER_SIZE};
 use anyhow::bail;
 use chrono::{DateTime, Utc};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::{cmp, io, thread};
+use std::{
+    cmp, io,
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    thread,
+};
 
 /// A medium that stores backups on the local filesystem.
 pub struct LocalMedium {

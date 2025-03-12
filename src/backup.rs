@@ -3,18 +3,23 @@
 //! The current approach is single-threaded and does not utilize IO parallelism,
 //! which could be a beneficial improvement for backups of many small files.
 
-use crate::chunks_reader::ChunksReader;
-use crate::medium::Medium;
-use crate::model::{
-    BlockId, ChunkHash, ChunkLocation, ChunkMetadata, DirectoryEntry, FileEntry, Tree, TreeEntry,
-    Version,
+use crate::{
+    chunks_reader::ChunksReader,
+    get_file_name, get_file_permissions,
+    medium::Medium,
+    model::{
+        BlockId, ChunkHash, ChunkLocation, ChunkMetadata, DirectoryEntry, FileEntry, Tree,
+        TreeEntry, Version,
+    },
+    APPROX_MAX_BLOCK_SIZE, CHUNK_SIZE,
 };
-use crate::{get_file_name, get_file_permissions, APPROX_MAX_BLOCK_SIZE, CHUNK_SIZE};
 use anyhow::anyhow;
 use indicatif::{HumanBytes, ProgressBar};
-use std::collections::HashMap;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 pub struct Config<'a> {
     pub source_dir: PathBuf,

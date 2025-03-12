@@ -3,8 +3,10 @@
 use crate::Permissions;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-use std::io::{Read, Write};
+use std::{
+    fmt::{Display, Formatter},
+    io::{Read, Write},
+};
 use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]

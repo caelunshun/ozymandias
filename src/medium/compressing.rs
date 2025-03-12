@@ -1,9 +1,11 @@
-use crate::medium::Medium;
-use crate::model::BlockId;
+use crate::{medium::Medium, model::BlockId};
 use anyhow::anyhow;
 use chrono::{DateTime, Utc};
-use std::io;
-use std::io::{Cursor, Read, Write};
+use std::{
+    io,
+    io::{Cursor, Read, Write},
+    thread::available_parallelism,
+};
 
 /// A `Medium` composition that adds compression.
 ///
@@ -100,8 +102,9 @@ impl CompressionType {
         match self {
             CompressionType::None => Ok(Box::new(writer)),
             CompressionType::Zstd { compression_level } => {
-                let encoder = zstd::Encoder::new(writer, compression_level)?.auto_finish();
-                Ok(Box::new(encoder))
+                let mut encoder = zstd::Encoder::new(writer, compression_level)?;
+                encoder.multithread(available_parallelism()?.get() as u32 / 2)?;
+                Ok(Box::new(encoder.auto_finish()))
             }
         }
     }

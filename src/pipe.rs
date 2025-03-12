@@ -7,11 +7,14 @@
 use anyhow::anyhow;
 use diatomic_waker::{WakeSink, WakeSource};
 use rtrb::{Consumer, Producer, RingBuffer};
-use std::io::{Cursor, Error, IoSlice, Read, Write};
-use std::pin::{pin, Pin};
-use std::sync::{Arc, Mutex};
-use std::task::{ready, Context, Poll};
-use std::{future, io, mem};
+use std::{
+    future, io,
+    io::{Cursor, Error, IoSlice, Read, Write},
+    mem,
+    pin::{pin, Pin},
+    sync::{Arc, Mutex},
+    task::{ready, Context, Poll},
+};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 
 /// Constructs a pipe with the provided buffer size.
@@ -434,9 +437,12 @@ where
 #[cfg(test)]
 mod tests {
     use anyhow::anyhow;
-    use std::io::{Read, Write};
-    use std::time::Duration;
-    use std::{io, thread};
+    use std::{
+        io,
+        io::{Read, Write},
+        thread,
+        time::Duration,
+    };
 
     #[test]
     fn blocking() {
