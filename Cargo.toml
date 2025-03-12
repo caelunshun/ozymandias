@@ -1,6 +1,6 @@
 [package]
 name = "ozymandias"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 description = "Alpha-quality backup program."
 license = "GPL-3.0-or-later"
@@ -22,12 +22,9 @@ clap = { version = "4", features = ["derive"] }
 diatomic-waker = "0.2"
 flume = "0.11"
 fs-err = "3"
-hex = "0.4"
-humansize = "2"
 indicatif = "0.17"
 pollster = "0.4"
 rand = "0.8"
-rayon = "1"
 ron = "0.8"
 rtrb = "0.3"
 serde = { version = "1", features = ["derive"] }
@@ -37,7 +34,6 @@ zstd = { version = "0.13", features = ["zstdmt"] }
 jemallocator = "0.5"
 
 [dev-dependencies]
-rstest = "0.23"
 tempfile = "3"
 
 [profile.dev.package.'*']
