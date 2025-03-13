@@ -19,6 +19,8 @@ use std::{
     collections::HashMap,
     io::Write,
     path::{Path, PathBuf},
+    thread::sleep,
+    time::Duration,
 };
 
 pub struct Config<'a> {
@@ -83,21 +85,30 @@ impl<'a> Driver<'a> {
         ));
     }
 
-    fn back_up_path(&mut self, path: &Path) -> anyhow::Result<TreeEntry> {
-        let result = match fs::metadata(path)?.file_type() {
-            f if f.is_file() => self.back_up_file(path).map(TreeEntry::File),
-            f if f.is_dir() => self.back_up_dir(path).map(TreeEntry::Directory),
-            _ => Err(anyhow!("unsupported file type at {}", path.display())),
-        };
-        self.update_progress();
-        result
+    fn back_up_path(&mut self, path: &Path) -> TreeEntry {
+        loop {
+            let result = match fs::metadata(path).map(|m| m.file_type()) {
+                Ok(f) if f.is_file() => self.back_up_file(path).map(TreeEntry::File),
+                Ok(f) if f.is_dir() => self.back_up_dir(path).map(TreeEntry::Directory),
+                Ok(_) => Err(anyhow!("unsupported file type at {}", path.display())),
+                Err(e) => Err(e.into()),
+            };
+            self.update_progress();
+            match result {
+                Ok(res) => break res,
+                Err(e) => {
+                    eprintln!("Error for path {}, retrying in 15s: {e:?}", path.display());
+                    sleep(Duration::from_secs(15));
+                }
+            }
+        }
     }
 
     pub fn back_up_dir(&mut self, path: &Path) -> anyhow::Result<DirectoryEntry> {
         let mut children = Vec::new();
         for entry in fs::read_dir(path)? {
             let entry = entry?;
-            let entry = self.back_up_path(&entry.path())?;
+            let entry = self.back_up_path(&entry.path());
             children.push(entry);
         }
 
