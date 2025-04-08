@@ -1,6 +1,5 @@
 use anyhow::Context;
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use jemallocator::Jemalloc;
 use ozymandias::{
     backup,
     medium::{
@@ -16,9 +15,6 @@ use ozymandias::{
 use std::path::{Path, PathBuf};
 
 mod daemon;
-
-#[global_allocator]
-static ALLOCATOR: Jemalloc = Jemalloc;
 
 #[derive(Debug, Parser)]
 struct Cli {
