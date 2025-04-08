@@ -51,6 +51,7 @@ enum MediumConfig {
 enum Command {
     Backup(BackupArgs),
     Restore(RestoreArgs),
+    DebugVersion,
     Daemon {
         #[arg(long)]
         config: PathBuf,
@@ -88,6 +89,15 @@ pub fn main() -> anyhow::Result<()> {
             do_restore(&*medium, args)?
         }
         Command::Daemon { config } => run_daemon(&cli, config)?,
+        Command::DebugVersion => {
+            let medium = create_medium(
+                &cli,
+                cli.backup_name.as_ref().context("missing backup name")?,
+            )?;
+            let version =
+                Version::decode(&medium.load_version(0)?.context("no versions to restore")?[..])?;
+            println!("{version:#?}");
+        }
     }
 
     Ok(())

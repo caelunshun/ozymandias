@@ -82,8 +82,7 @@ struct RestoreChunk {
     /// Target file the chunk should be written to.
     target_path: PathBuf,
     /// Byte offset within the target file at which the chunk will be written.
-    /// If `None`, then the chunk is appended to the end of the file.
-    target_byte_offset: Option<u64>,
+    target_byte_offset: u64,
     num_bytes: usize,
 }
 
@@ -141,7 +140,7 @@ fn diff_file_chunks(
 
     let mut buffer = Vec::new();
 
-    let mut byte_offset = Some(0);
+    let mut byte_offset = 0;
 
     for chunk in &file_entry.chunks {
         if chunk.uncompressed_size > MAX_RESTORE_CHUNK_SIZE {
@@ -157,9 +156,7 @@ fn diff_file_chunks(
                 hash != chunk.hash
             }
             Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
-                // Chunk not fully present. Set `byte_offset to `None`
-                // so that remaining chunks are written to the end of the file.
-                byte_offset = None;
+                // Chunk not fully present.
                 true
             }
             Err(e) => return Err(e.into()),
@@ -174,9 +171,7 @@ fn diff_file_chunks(
             });
         }
 
-        if let Some(byte_offset) = &mut byte_offset {
-            *byte_offset += u64::try_from(chunk.uncompressed_size).unwrap();
-        }
+        byte_offset += chunk.uncompressed_size as u64;
 
         buffer.clear();
     }
@@ -185,13 +180,15 @@ fn diff_file_chunks(
 
 fn all_file_chunks(file_entry: &FileEntry, file_path: &Path) -> anyhow::Result<Vec<RestoreChunk>> {
     let mut restore_chunks = Vec::<RestoreChunk>::new();
+    let mut offset = 0;
     for chunk in &file_entry.chunks {
         restore_chunks.push(RestoreChunk {
             location: chunk.location.clone(),
             target_path: file_path.to_path_buf(),
-            target_byte_offset: None,
+            target_byte_offset: offset,
             num_bytes: chunk.uncompressed_size,
         });
+        offset += chunk.uncompressed_size as u64;
     }
     Ok(restore_chunks)
 }
@@ -305,14 +302,7 @@ impl<'a> Driver<'a> {
         let chunk_size = chunk.num_bytes;
         self.total_bytes_restored += u64::try_from(chunk_size).unwrap();
 
-        match chunk.target_byte_offset {
-            Some(offset) => {
-                target_file.seek(SeekFrom::Start(offset))?;
-            }
-            None => {
-                target_file.seek(SeekFrom::End(0))?;
-            }
-        }
+        target_file.seek(SeekFrom::Start(chunk.target_byte_offset))?;
         let bytes = &source_block.bytes[chunk.location.uncompressed_byte_offset..][..chunk_size];
         target_file.write_all(bytes)?;
 
