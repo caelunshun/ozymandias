@@ -49,7 +49,13 @@ pub fn run(
 /// chunks in the same block are loaded together is important
 /// to reduce the number of accesses to the backup medium.
 struct Plan {
+    create_files: Vec<(PathBuf, FileTypeEnum)>,
     restore_chunks: Vec<RestoreChunk>,
+}
+
+enum FileTypeEnum {
+    File,
+    Directory,
 }
 
 impl Plan {
@@ -91,6 +97,7 @@ struct RestoreChunk {
 fn create_plan(backup_tree: &Tree, target_root: &Path) -> anyhow::Result<Plan> {
     let mut plan = Plan {
         restore_chunks: Vec::new(),
+        create_files: Vec::new(),
     };
     for root_child in backup_tree.root_children() {
         add_entry_to_plan(root_child, &target_root.join(root_child.name()), &mut plan)?;
@@ -106,9 +113,13 @@ fn add_entry_to_plan(
 ) -> anyhow::Result<()> {
     match entry {
         TreeEntry::File(file_entry) => {
+            plan.create_files
+                .push((current_path.to_path_buf(), FileTypeEnum::File));
             add_file_entry_to_plan(file_entry, current_path, plan)?;
         }
         TreeEntry::Directory(dir) => {
+            plan.create_files
+                .push((current_path.to_path_buf(), FileTypeEnum::Directory));
             for child in &dir.children {
                 add_entry_to_plan(child, &current_path.join(child.name()), plan)?;
             }
@@ -263,6 +274,17 @@ impl<'a> Driver<'a> {
     }
 
     pub fn do_restore(&mut self) -> anyhow::Result<()> {
+        for (path, file_type) in &self.plan.create_files {
+            if !path.exists() {
+                match file_type {
+                    FileTypeEnum::File => {
+                        fs::File::create(path)?;
+                    }
+                    FileTypeEnum::Directory => fs::create_dir_all(path)?,
+                }
+            }
+        }
+
         for chunk in &self.plan.restore_chunks {
             self.restore_chunk(chunk)?;
             self.update_progress();
